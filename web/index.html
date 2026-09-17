@@ -1,0 +1,94 @@
+<title>MonxuCAD</title>
+<link rel="stylesheet" href="app.css">
+
+<div id="app">
+
+  <!-- ══════════ Barra de título ══════════ -->
+  <header id="titlebar">
+    <button id="appMenuBtn" class="app-btn" title="Menú de la aplicación" aria-label="Menú de la aplicación">A</button>
+    <div id="qat" class="qat" role="toolbar" aria-label="Acceso rápido"></div>
+    <div class="title-center">
+      <span id="docTitle">MonxuCAD&nbsp; &nbsp;Dibujo1.dxf</span>
+    </div>
+    <div class="title-right">
+      <input id="searchBox" type="search" placeholder="Escriba una palabra clave o frase" aria-label="Buscar comando">
+      <button class="tbtn" id="btnHelp" title="Ayuda (F1)" aria-label="Ayuda">?</button>
+    </div>
+  </header>
+
+  <!-- ══════════ Cinta de opciones ══════════ -->
+  <nav id="ribbonTabs" role="tablist" aria-label="Cinta de opciones"></nav>
+  <section id="ribbon" aria-label="Paneles de la cinta"></section>
+
+  <!-- ══════════ Zona central ══════════ -->
+  <main id="main">
+    <aside id="palettes" aria-label="Paletas"></aside>
+
+    <div id="canvasWrap">
+      <canvas id="cv" aria-label="Área de dibujo"></canvas>
+
+      <div id="viewcube" title="ViewCube — clic para vista superior">
+        <div class="vc-top">SUP</div>
+        <div class="vc-axis"><span>X</span><span>Y</span></div>
+      </div>
+
+      <div id="navbar" aria-label="Barra de navegación"></div>
+
+      <div id="dynin" hidden>
+        <div class="dyn-row"><input id="dynA" spellcheck="false" autocomplete="off"><span class="dyn-sep" id="dynSep">,</span><input id="dynB" spellcheck="false" autocomplete="off"></div>
+        <div class="dyn-tip" id="dynTip"></div>
+      </div>
+
+      <div id="snapTip" hidden></div>
+      <div id="toast" hidden></div>
+
+      <div id="layoutTabs" role="tablist" aria-label="Espacios de trabajo"></div>
+    </div>
+  </main>
+
+  <!-- ══════════ Ventana de comandos ══════════ -->
+  <section id="cmdwin" aria-label="Ventana de comandos">
+    <div id="cmdhist" role="log" aria-live="polite"></div>
+    <div id="cmdrow">
+      <span id="cmdIcon">▸</span>
+      <span id="prompt">Comando:&nbsp;</span>
+      <input id="cmdinput" type="text" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="Línea de comandos">
+    </div>
+    <div id="autocomp" hidden></div>
+  </section>
+
+  <!-- ══════════ Barra de estado ══════════ -->
+  <footer id="statusbar">
+    <span id="coords" title="Coordenadas del cursor">0.0000, 0.0000, 0.0000</span>
+    <div id="statusToggles"></div>
+    <div id="statusRight">
+      <span class="stat-sep"></span>
+      <span id="scaleLabel" title="Escala de anotación">1:1</span>
+      <span id="entCount" title="Objetos en el dibujo">0 objetos</span>
+    </div>
+  </footer>
+</div>
+
+<div id="modalRoot"></div>
+<input type="file" id="fileInput" accept=".dxf,.dwg,.json,.dcad" hidden>
+
+<script src="js/geom.js"></script>
+<script src="js/doc.js"></script>
+<script src="js/dim.js"></script>
+<script src="js/hatchlib.js"></script>
+<script src="js/blocks.js"></script>
+<script src="js/templates.js"></script>
+<script src="js/render.js"></script>
+<script src="js/snap.js"></script>
+<script src="js/dxf.js"></script>
+<script src="js/boundary.js"></script>
+<script src="js/export.js"></script>
+<script src="js/cmd.js"></script>
+<script src="js/commands-draw.js"></script>
+<script src="js/commands-modify.js"></script>
+<script src="js/commands-annot.js"></script>
+<script src="js/commands-misc.js"></script>
+<script src="js/commands-extra.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+<script src="js/dwgbridge.js"></script>

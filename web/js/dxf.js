@@ -1,0 +1,1037 @@
+/* ============================================================
+   dxf.js — Lectura y escritura de DXF (AC1009 / R12 y AC1015 / R2000)
+   ============================================================ */
+(function () {
+  'use strict';
+  var CAD = (window.CAD = window.CAD || {});
+  var G = CAD.G, E = CAD.E;
+  var DXF = (CAD.DXF = {});
+
+  /* ============================================================
+     ESCRITURA
+     ============================================================ */
+  function Writer(version) {
+    this.v = version || 'AC1015';
+    this.r2000 = this.v !== 'AC1009';
+    this.out = [];
+    this.hSeed = 0x30;
+    this.fixed = { nod: 'C', groupDict: 'D', psDict: 'E', placeholder: 'F' };
+  }
+  Writer.prototype.h = function () { return (this.hSeed++).toString(16).toUpperCase(); };
+  Writer.prototype.p = function (code, val) {
+    this.out.push(String(code));
+    if (typeof val === 'number') {
+      if (code >= 10 && code < 60 || (code >= 110 && code < 150) || (code >= 210 && code < 240) || code === 1040) {
+        this.out.push(fixNum(val));
+      } else this.out.push(String(Math.round(val)));
+    } else this.out.push(String(val === undefined || val === null ? '' : val));
+    return this;
+  };
+  function fixNum(v) {
+    if (!isFinite(v)) v = 0;
+    var s = v.toFixed(10);
+    s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '.0');
+    if (s.indexOf('.') < 0) s += '.0';
+    return s;
+  }
+  Writer.prototype.pt = function (base, p, z) {
+    this.p(base, p.x); this.p(base + 10, p.y); this.p(base + 20, z || 0);
+    return this;
+  };
+  Writer.prototype.text = function () { return this.out.join('\r\n') + '\r\n'; };
+
+  /* -------- Cabeceras de entidad -------- */
+  Writer.prototype.entHead = function (type, ent, doc, owner, subclass) {
+    this.p(0, type);
+    if (this.r2000) {
+      this.p(5, this.h());
+      if (owner) this.p(330, owner);
+      this.p(100, 'AcDbEntity');
+    }
+    this.p(8, layerName(ent.layer, this.r2000));
+    var col = ent.color;
+    if (col !== undefined && col !== 256) {
+      if (typeof col === 'object' && col.rgb) {
+        this.p(62, G.rgbToACI(col.rgb[0], col.rgb[1], col.rgb[2]));
+        if (this.r2000) this.p(420, (col.rgb[0] << 16) | (col.rgb[1] << 8) | col.rgb[2]);
+      } else this.p(62, col | 0);
+    }
+    var lt = ent.ltype;
+    if (lt && lt !== 'ByLayer' && lt !== 'BYLAYER') this.p(6, ltName(lt, this.r2000));
+    if (ent.lw !== undefined && ent.lw !== -1 && this.r2000) this.p(370, ent.lw);
+    if (ent.ltscale && ent.ltscale !== 1) this.p(48, ent.ltscale);
+    if (this.r2000 && subclass) this.p(100, subclass);
+    return this;
+  };
+
+  function layerName(n, r2000) {
+    if (!n) return '0';
+    if (r2000) return n;
+    return String(n).toUpperCase().replace(/[^A-Z0-9_$\-]/g, '_').slice(0, 31) || '0';
+  }
+  function ltName(n, r2000) {
+    if (!n) return 'CONTINUOUS';
+    if (r2000) return n;
+    return String(n).toUpperCase().replace(/[^A-Z0-9_$\-]/g, '_').slice(0, 31);
+  }
+
+  /* ============================================================
+     Entidades
+     ============================================================ */
+  Writer.prototype.entity = function (ent, doc, owner) {
+    var W = this;
+    switch (ent.type) {
+      case 'LINE':
+        W.entHead('LINE', ent, doc, owner, 'AcDbLine');
+        W.pt(10, ent.p1); W.pt(11, ent.p2);
+        break;
+      case 'XLINE': case 'RAY':
+        if (W.r2000) {
+          W.entHead(ent.type, ent, doc, owner, ent.type === 'XLINE' ? 'AcDbXline' : 'AcDbRay');
+          W.pt(10, ent.p); W.pt(11, ent.d);
+        } else {
+          var big = 1e5, a = Math.atan2(ent.d.y, ent.d.x);
+          W.entHead('LINE', ent, doc, owner, 'AcDbLine');
+          W.pt(10, ent.type === 'XLINE' ? G.polar(ent.p, a, -big) : ent.p);
+          W.pt(11, G.polar(ent.p, a, big));
+        }
+        break;
+      case 'CIRCLE':
+        W.entHead('CIRCLE', ent, doc, owner, 'AcDbCircle');
+        W.pt(10, ent.c); W.p(40, ent.r);
+        break;
+      case 'ARC':
+        W.entHead('ARC', ent, doc, owner, 'AcDbCircle');
+        W.pt(10, ent.c); W.p(40, ent.r);
+        if (W.r2000) W.p(100, 'AcDbArc');
+        W.p(50, G.deg(G.na(ent.a0))); W.p(51, G.deg(G.na(ent.a1)));
+        break;
+      case 'POINT':
+        W.entHead('POINT', ent, doc, owner, 'AcDbPoint');
+        W.pt(10, ent.p);
+        break;
+      case 'ELLIPSE':
+        if (W.r2000) {
+          W.entHead('ELLIPSE', ent, doc, owner, 'AcDbEllipse');
+          W.pt(10, ent.c); W.pt(11, ent.maj);
+          W.p(210, 0); W.p(220, 0); W.p(230, 1);
+          W.p(40, ent.ratio); W.p(41, ent.t0); W.p(42, ent.t1);
+        } else {
+          W.polyFromPts(E.segs(ent, doc, 2)[0], ent, doc, owner);
+        }
+        break;
+      case 'LWPOLYLINE':
+        if (W.r2000) {
+          W.entHead('LWPOLYLINE', ent, doc, owner, 'AcDbPolyline');
+          W.p(90, ent.verts.length);
+          W.p(70, ent.closed ? 1 : 0);
+          if (ent.width) W.p(43, ent.width);
+          ent.verts.forEach(function (v) {
+            W.p(10, v.x); W.p(20, v.y);
+            if (v.sw || v.ew) { W.p(40, v.sw || 0); W.p(41, v.ew || 0); }
+            if (v.b) W.p(42, v.b);
+          });
+        } else {
+          W.p(0, 'POLYLINE'); W.p(8, layerName(ent.layer, false));
+          if (ent.color !== undefined && ent.color !== 256) W.p(62, ent.color | 0);
+          if (ent.ltype && ent.ltype !== 'ByLayer') W.p(6, ltName(ent.ltype, false));
+          W.p(66, 1); W.p(10, 0); W.p(20, 0); W.p(30, 0);
+          W.p(70, ent.closed ? 1 : 0);
+          if (ent.width) { W.p(40, ent.width); W.p(41, ent.width); }
+          ent.verts.forEach(function (v) {
+            W.p(0, 'VERTEX'); W.p(8, layerName(ent.layer, false));
+            W.p(10, v.x); W.p(20, v.y); W.p(30, 0); W.p(70, 0);
+            if (v.b) W.p(42, v.b);
+          });
+          W.p(0, 'SEQEND'); W.p(8, layerName(ent.layer, false));
+        }
+        break;
+      case 'SPLINE':
+        W.polyFromPts({ pts: E.splinePts(ent), closed: ent.closed }, ent, doc, owner);
+        break;
+      case 'SOLID': {
+        W.entHead('SOLID', ent, doc, owner, 'AcDbTrace');
+        var q = ent.pts;
+        W.pt(10, q[0]); W.pt(11, q[1]);
+        W.pt(12, q[3] || q[2]); W.pt(13, q[2]);
+        break;
+      }
+      case 'TEXT': {
+        W.entHead('TEXT', ent, doc, owner, 'AcDbText');
+        W.pt(10, ent.p);
+        W.p(40, ent.h);
+        W.p(1, sanitize(ent.text));
+        if (ent.rot) W.p(50, G.deg(ent.rot));
+        if (ent.wfac && ent.wfac !== 1) W.p(41, ent.wfac);
+        if (ent.oblique) W.p(51, ent.oblique);
+        W.p(7, ent.style || 'Standard');
+        if (ent.halign) W.p(72, ent.halign);
+        if (ent.p2 || ent.halign || ent.valign) W.pt(11, ent.p2 || ent.p);
+        if (W.r2000) W.p(100, 'AcDbText');
+        if (ent.valign) W.p(73, ent.valign);
+        break;
+      }
+      case 'MTEXT':
+        if (W.r2000) {
+          W.entHead('MTEXT', ent, doc, owner, 'AcDbMText');
+          W.pt(10, ent.p);
+          W.p(40, ent.h);
+          W.p(41, ent.width || 0);
+          W.p(71, ent.attach || 1);
+          W.p(72, 5);
+          var t = sanitize(String(ent.text || '').replace(/\n/g, '\\P'));
+          while (t.length > 250) { W.p(3, t.slice(0, 250)); t = t.slice(250); }
+          W.p(1, t);
+          W.p(7, ent.style || 'Standard');
+          if (ent.rot) W.p(50, G.deg(ent.rot));
+        } else {
+          var lay = E.mtextLayout(ent, doc);
+          lay.lines.forEach(function (line, i) {
+            var te = E.text({ x: lay.o.x, y: lay.o.y - (i + 0.85) * lay.lh }, ent.h, line, ent.rot,
+              { layer: ent.layer, color: ent.color, ltype: ent.ltype, style: ent.style });
+            W.entity(te, doc, owner);
+          });
+        }
+        break;
+      case 'INSERT': {
+        var atts = (ent.attribs || []).filter(function (a) { return a && a.tag; });
+        W.entHead('INSERT', ent, doc, owner, 'AcDbBlockReference');
+        if (atts.length) W.p(66, 1);
+        W.p(2, ent.name);
+        W.pt(10, ent.p);
+        W.p(41, ent.sx); W.p(42, ent.sy); W.p(43, 1);
+        if (ent.rot) W.p(50, G.deg(ent.rot));
+        if (atts.length) {
+          var blk0 = doc.blocks[ent.name] || { base: { x: 0, y: 0 } };
+          var m = G.mMul(G.mMul(G.mTrans(-blk0.base.x, -blk0.base.y), G.mScale(ent.sx, ent.sy)),
+            G.mMul(G.mRot(ent.rot), G.mTrans(ent.p.x, ent.p.y)));
+          atts.forEach(function (at) {
+            var w = E.deep(at);
+            E.transform(w, m, doc);
+            w.layer = at.layer || ent.layer;
+            W.attrib(w, doc, owner);
+          });
+          W.p(0, 'SEQEND');
+          if (W.r2000) { W.p(5, W.h()); if (owner) W.p(330, owner); W.p(100, 'AcDbEntity'); }
+          W.p(8, layerName(ent.layer, W.r2000));
+        }
+        break;
+      }
+      case 'ATTDEF': {
+        W.entHead('ATTDEF', ent, doc, owner, 'AcDbText');
+        W.pt(10, ent.p);
+        W.p(40, ent.h);
+        W.p(1, sanitize(ent.def === undefined ? '' : ent.def));
+        if (ent.rot) W.p(50, G.deg(ent.rot));
+        W.p(7, ent.style || 'Standard');
+        if (ent.halign) W.p(72, ent.halign);
+        W.pt(11, ent.p2 || ent.p);
+        if (W.r2000) W.p(100, 'AcDbAttributeDefinition');
+        W.p(3, sanitize(ent.prompt || ent.tag));
+        W.p(2, ent.tag);
+        W.p(70, ent.flags || 0);
+        if (ent.valign) W.p(74, ent.valign);
+        break;
+      }
+      case 'ATTRIB':
+        W.attrib(ent, doc, owner);
+        break;
+      case 'HATCH':
+        if (W.r2000) W.hatch(ent, doc, owner);
+        else {
+          ent.loops.forEach(function (l) {
+            W.polyFromPts({ pts: l, closed: true }, ent, doc, owner);
+          });
+        }
+        break;
+      case 'DIMENSION': case 'LEADER':
+        /* gestionado aparte mediante bloque anónimo */
+        break;
+    }
+  };
+
+  Writer.prototype.attrib = function (ent, doc, owner) {
+    var W = this;
+    W.entHead('ATTRIB', ent, doc, owner, 'AcDbText');
+    W.pt(10, ent.p);
+    W.p(40, ent.h);
+    W.p(1, sanitize(ent.text));
+    if (ent.rot) W.p(50, G.deg(ent.rot));
+    W.p(7, ent.style || 'Standard');
+    if (ent.halign) W.p(72, ent.halign);
+    W.pt(11, ent.p2 || ent.p);
+    if (W.r2000) W.p(100, 'AcDbAttribute');
+    W.p(2, ent.tag);
+    W.p(70, ent.flags || 0);
+    if (ent.valign) W.p(74, ent.valign);
+  };
+
+  Writer.prototype.polyFromPts = function (seg, ent, doc, owner) {
+    if (!seg || !seg.pts || seg.pts.length < 2) return;
+    var proxy = { type: 'LWPOLYLINE', layer: ent.layer, color: ent.color, ltype: ent.ltype, lw: ent.lw, ltscale: ent.ltscale, closed: seg.closed, width: 0, verts: seg.pts.map(function (p) { return { x: p.x, y: p.y, b: 0 }; }) };
+    this.entity(proxy, doc, owner);
+  };
+
+  function sanitize(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/\r/g, '').replace(/\n/g, '\\P');
+  }
+
+  /* -------- HATCH (sólo R2000+) -------- */
+  Writer.prototype.hatch = function (ent, doc, owner) {
+    var W = this;
+    var solid = ent.solid || CAD.HatchLib.isSolid(ent.pattern);
+    W.entHead('HATCH', ent, doc, owner, 'AcDbHatch');
+    W.p(10, 0); W.p(20, 0); W.p(30, 0);
+    W.p(210, 0); W.p(220, 0); W.p(230, 1);
+    W.p(2, solid ? 'SOLID' : ent.pattern);
+    W.p(70, solid ? 1 : 0);
+    W.p(71, 0);
+    W.p(91, ent.loops.length);
+    ent.loops.forEach(function (loop, i) {
+      W.p(92, i === 0 ? 3 : 2);      /* 1=externo, 2=polilínea */
+      W.p(72, 0);                     /* sin bulges */
+      W.p(73, 1);                     /* cerrado */
+      W.p(93, loop.length);
+      loop.forEach(function (p) { W.p(10, p.x); W.p(20, p.y); });
+      W.p(97, 0);
+    });
+    W.p(75, 1);   /* estilo normal */
+    W.p(76, 1);   /* predefinido */
+    if (!solid) {
+      W.p(52, G.deg(ent.angle || 0));
+      W.p(41, ent.scale || 1);
+      W.p(77, 0);
+      var defs = CAD.HatchLib.defs(ent.pattern);
+      var sc0 = ent.scale || 1, rot0 = G.deg(ent.angle || 0);
+      W.p(78, defs.length);
+      defs.forEach(function (d) {
+        var ang = G.rad(d.a + rot0);
+        W.p(53, d.a + rot0);
+        W.p(43, (d.x || 0) * sc0);
+        W.p(44, (d.y || 0) * sc0);
+        W.p(45, (d.dx || 0) * sc0 * Math.cos(ang) - (d.dy || 0) * sc0 * Math.sin(ang));
+        W.p(46, (d.dx || 0) * sc0 * Math.sin(ang) + (d.dy || 0) * sc0 * Math.cos(ang));
+        var dash = d.dash || [];
+        W.p(79, dash.length);
+        dash.forEach(function (v) { W.p(49, v * sc0); });
+      });
+    }
+    W.p(98, 1);
+    var c = G.polyCentroid(ent.loops[0] || [{ x: 0, y: 0 }]);
+    W.p(10, c.x); W.p(20, c.y);
+  };
+
+  /* -------- Cotas: bloque anónimo + entidad DIMENSION -------- */
+  var DIMTYPE = { linear: 0, rotated: 0, aligned: 1, angular: 2, diameter: 3, radius: 4, arclen: 2, ordinate: 6 };
+
+  Writer.prototype.dimension = function (ent, doc, owner, blockName) {
+    var W = this;
+    var st = CAD.Dim.style(ent, doc);
+    var geo = CAD.Dim.build(ent, doc);
+    W.p(0, 'DIMENSION');
+    if (W.r2000) { W.p(5, W.h()); if (owner) W.p(330, owner); W.p(100, 'AcDbEntity'); }
+    W.p(8, layerName(ent.layer, W.r2000));
+    if (ent.color !== undefined && ent.color !== 256) W.p(62, ent.color | 0);
+    if (W.r2000) W.p(100, 'AcDbDimension');
+    W.p(2, blockName);
+    var defPt = ent.p3 || ent.p1 || { x: 0, y: 0 };
+    W.pt(10, defPt);
+    var tp = (geo.texts[0] && geo.texts[0].p) || defPt;
+    W.pt(11, tp);
+    var typ = DIMTYPE[ent.kind] === undefined ? 0 : DIMTYPE[ent.kind];
+    W.p(70, typ + 32 + (ent.textPos ? 128 : 0));
+    W.p(71, 5);
+    if (ent.textOverride) W.p(1, sanitize(ent.textOverride));
+    W.p(3, ent.style || 'ISO-25');
+    switch (ent.kind) {
+      case 'linear': case 'rotated':
+        if (W.r2000) W.p(100, 'AcDbAlignedDimension');
+        W.pt(13, ent.p1); W.pt(14, ent.p2);
+        W.p(50, G.deg(ent.rot || 0));
+        if (W.r2000) W.p(100, 'AcDbRotatedDimension');
+        break;
+      case 'aligned':
+        if (W.r2000) W.p(100, 'AcDbAlignedDimension');
+        W.pt(13, ent.p1); W.pt(14, ent.p2);
+        break;
+      case 'radius':
+        if (W.r2000) W.p(100, 'AcDbRadialDimension');
+        W.pt(15, ent.p1); W.p(40, 0);
+        break;
+      case 'diameter':
+        if (W.r2000) W.p(100, 'AcDbDiametricDimension');
+        W.pt(15, ent.p1); W.p(40, 0);
+        break;
+      case 'angular': case 'arclen':
+        if (W.r2000) W.p(100, 'AcDb3PointAngularDimension');
+        W.pt(13, ent.p1); W.pt(14, ent.p2); W.pt(15, ent.center); W.pt(16, ent.p3);
+        break;
+      case 'ordinate':
+        if (W.r2000) W.p(100, 'AcDbOrdinateDimension');
+        W.pt(13, ent.p1); W.pt(14, ent.p2);
+        break;
+    }
+  };
+
+  /* ============================================================
+     Documento completo
+     ============================================================ */
+  DXF.write = function (doc, opts) {
+    opts = opts || {};
+    var W = new Writer(opts.version || 'AC1015');
+    var r2000 = W.r2000;
+
+    /* --- bloques anónimos de cota --- */
+    var dimBlocks = [];
+    var dimIdx = 0;
+    doc.entities.forEach(function (e) {
+      if (e.type === 'DIMENSION') {
+        dimIdx++;
+        var name = '*D' + dimIdx;
+        dimBlocks.push({ name: name, ent: e, geo: CAD.Dim.explode(e, doc) });
+      }
+    });
+
+    /* --- reserva de manejadores --- */
+    var handles = {};
+    if (r2000) {
+      handles.blockRecordTable = W.h();
+      handles.layerTable = W.h();
+      handles.ltypeTable = W.h();
+      handles.styleTable = W.h();
+      handles.viewTable = W.h();
+      handles.ucsTable = W.h();
+      handles.appidTable = W.h();
+      handles.dimstyleTable = W.h();
+      handles.vportTable = W.h();
+      handles.modelRec = W.h();
+      handles.paperRec = W.h();
+      handles.blockRecs = {};
+      Object.keys(doc.blocks).forEach(function (n) { handles.blockRecs[n] = W.h(); });
+      dimBlocks.forEach(function (d) { handles.blockRecs[d.name] = W.h(); });
+    }
+
+    var bb = E.extentsAll(doc.entities, doc);
+    if (!G.bboxValid(bb)) bb = { x1: 0, y1: 0, x2: 420, y2: 297 };
+
+    /* ---------------- HEADER ---------------- */
+    W.p(0, 'SECTION'); W.p(2, 'HEADER');
+    W.p(9, '$ACADVER'); W.p(1, W.v);
+    if (r2000) { W.p(9, '$HANDSEED'); W.p(5, 'FFFF'); }
+    W.p(9, '$DWGCODEPAGE'); W.p(3, 'ANSI_1252');
+    W.p(9, '$INSBASE'); W.p(10, 0); W.p(20, 0); W.p(30, 0);
+    W.p(9, '$EXTMIN'); W.p(10, bb.x1); W.p(20, bb.y1); W.p(30, 0);
+    W.p(9, '$EXTMAX'); W.p(10, bb.x2); W.p(20, bb.y2); W.p(30, 0);
+    W.p(9, '$LIMMIN'); W.p(10, doc.vars.LIMMIN.x); W.p(20, doc.vars.LIMMIN.y);
+    W.p(9, '$LIMMAX'); W.p(10, doc.vars.LIMMAX.x); W.p(20, doc.vars.LIMMAX.y);
+    W.p(9, '$CLAYER'); W.p(8, layerName(doc.vars.CLAYER, r2000));
+    W.p(9, '$LTSCALE'); W.p(40, doc.vars.LTSCALE);
+    W.p(9, '$TEXTSIZE'); W.p(40, doc.vars.TEXTSIZE);
+    W.p(9, '$TEXTSTYLE'); W.p(7, doc.vars.TEXTSTYLE || 'Standard');
+    W.p(9, '$DIMSTYLE'); W.p(2, doc.vars.DIMSTYLE || 'ISO-25');
+    W.p(9, '$DIMSCALE'); W.p(40, doc.vars.DIMSCALE || 1);
+    W.p(9, '$DIMASZ'); W.p(40, 2.5);
+    W.p(9, '$DIMTXT'); W.p(40, 2.5);
+    W.p(9, '$INSUNITS'); W.p(70, doc.vars.INSUNITS || 4);
+    W.p(9, '$MEASUREMENT'); W.p(70, 1);
+    W.p(9, '$PDMODE'); W.p(70, doc.vars.PDMODE | 0);
+    W.p(9, '$PDSIZE'); W.p(40, doc.vars.PDSIZE || 0);
+    W.p(9, '$FILLMODE'); W.p(70, doc.vars.FILLMODE ? 1 : 0);
+    W.p(9, '$LUNITS'); W.p(70, doc.vars.LUNITS || 2);
+    W.p(9, '$LUPREC'); W.p(70, doc.vars.LUPREC || 4);
+    W.p(9, '$AUNITS'); W.p(70, doc.vars.AUNITS || 0);
+    W.p(9, '$AUPREC'); W.p(70, doc.vars.AUPREC || 2);
+    W.p(0, 'ENDSEC');
+
+    /* ---------------- CLASSES ---------------- */
+    if (r2000) { W.p(0, 'SECTION'); W.p(2, 'CLASSES'); W.p(0, 'ENDSEC'); }
+
+    /* ---------------- TABLES ---------------- */
+    W.p(0, 'SECTION'); W.p(2, 'TABLES');
+
+    /* VPORT */
+    startTable(W, 'VPORT', handles.vportTable, 1);
+    W.p(0, 'VPORT');
+    if (r2000) { W.p(5, W.h()); W.p(330, handles.vportTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbViewportTableRecord'); }
+    W.p(2, '*ACTIVE'); W.p(70, 0);
+    W.p(10, 0); W.p(20, 0); W.p(11, 1); W.p(21, 1);
+    W.p(12, (bb.x1 + bb.x2) / 2); W.p(22, (bb.y1 + bb.y2) / 2);
+    W.p(13, 0); W.p(23, 0); W.p(14, 10); W.p(24, 10);
+    W.p(15, 0); W.p(25, 0); W.p(16, 0); W.p(26, 0); W.p(36, 1);
+    W.p(17, 0); W.p(27, 0); W.p(37, 0);
+    W.p(40, Math.max(1, bb.y2 - bb.y1) * 1.2); W.p(41, 1.5); W.p(42, 50); W.p(43, 0); W.p(44, 0);
+    W.p(50, 0); W.p(51, 0); W.p(71, 0); W.p(72, 100); W.p(73, 1); W.p(74, 3);
+    W.p(75, 0); W.p(76, 0); W.p(77, 0); W.p(78, 0);
+    W.p(0, 'ENDTAB');
+
+    /* LTYPE */
+    var ltNames = Object.keys(doc.ltypes);
+    startTable(W, 'LTYPE', handles.ltypeTable, ltNames.length + 2);
+    ['ByBlock', 'ByLayer'].forEach(function (n) {
+      W.p(0, 'LTYPE');
+      if (r2000) { W.p(5, W.h()); W.p(330, handles.ltypeTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbLinetypeTableRecord'); }
+      W.p(2, r2000 ? n : n.toUpperCase()); W.p(70, 0); W.p(3, ''); W.p(72, 65); W.p(73, 0); W.p(40, 0);
+    });
+    ltNames.forEach(function (n) {
+      var lt = doc.ltypes[n];
+      W.p(0, 'LTYPE');
+      if (r2000) { W.p(5, W.h()); W.p(330, handles.ltypeTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbLinetypeTableRecord'); }
+      W.p(2, ltName(n, r2000)); W.p(70, 0); W.p(3, lt.desc || '');
+      W.p(72, 65); W.p(73, lt.pat.length);
+      W.p(40, lt.pat.reduce(function (a, b) { return a + Math.abs(b); }, 0));
+      lt.pat.forEach(function (d) { W.p(49, d); if (r2000) W.p(74, 0); });
+    });
+    W.p(0, 'ENDTAB');
+
+    /* LAYER */
+    var layers = doc.layerList();
+    startTable(W, 'LAYER', handles.layerTable, layers.length);
+    layers.forEach(function (l) {
+      W.p(0, 'LAYER');
+      if (r2000) { W.p(5, W.h()); W.p(330, handles.layerTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbLayerTableRecord'); }
+      W.p(2, layerName(l.name, r2000));
+      W.p(70, (l.frozen ? 1 : 0) + (l.locked ? 4 : 0));
+      W.p(62, l.on ? Math.abs(l.color | 0) : -Math.abs(l.color | 0));
+      W.p(6, ltName(l.ltype, r2000));
+      if (r2000) {
+        W.p(370, l.lw === undefined ? -3 : l.lw);
+        W.p(390, W.fixed.placeholder);
+        if (!l.plot) W.p(290, 0);
+      }
+    });
+    W.p(0, 'ENDTAB');
+
+    /* STYLE */
+    var styles = Object.keys(doc.textStyles);
+    startTable(W, 'STYLE', handles.styleTable, styles.length);
+    styles.forEach(function (n) {
+      var s = doc.textStyles[n];
+      W.p(0, 'STYLE');
+      if (r2000) { W.p(5, W.h()); W.p(330, handles.styleTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbTextStyleTableRecord'); }
+      W.p(2, r2000 ? n : n.toUpperCase()); W.p(70, 0); W.p(40, s.h || 0);
+      W.p(41, s.wfac || 1); W.p(50, s.oblique || 0); W.p(71, 0);
+      W.p(42, 2.5); W.p(3, s.font || 'txt'); W.p(4, s.bigfont || '');
+    });
+    W.p(0, 'ENDTAB');
+
+    /* VIEW / UCS */
+    startTable(W, 'VIEW', handles.viewTable, 0); W.p(0, 'ENDTAB');
+    startTable(W, 'UCS', handles.ucsTable, 0); W.p(0, 'ENDTAB');
+
+    /* APPID */
+    startTable(W, 'APPID', handles.appidTable, 1);
+    W.p(0, 'APPID');
+    if (r2000) { W.p(5, W.h()); W.p(330, handles.appidTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbRegAppTableRecord'); }
+    W.p(2, 'ACAD'); W.p(70, 0);
+    W.p(0, 'ENDTAB');
+
+    /* DIMSTYLE */
+    var dss = Object.keys(doc.dimStyles);
+    W.p(0, 'TABLE'); W.p(2, 'DIMSTYLE');
+    if (r2000) { W.p(5, handles.dimstyleTable); W.p(330, 0); W.p(100, 'AcDbSymbolTable'); }
+    W.p(70, dss.length);
+    if (r2000) W.p(100, 'AcDbDimStyleTable'), W.p(71, 0);
+    dss.forEach(function (n) {
+      var d = doc.dimStyles[n];
+      W.p(0, 'DIMSTYLE');
+      if (r2000) { W.p(105, W.h()); W.p(330, handles.dimstyleTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbDimStyleTableRecord'); }
+      W.p(2, r2000 ? n : n.toUpperCase()); W.p(70, 0);
+      W.p(41, d.DIMASZ); W.p(42, d.DIMEXO); W.p(44, d.DIMEXE); W.p(140, d.DIMTXT);
+      W.p(147, d.DIMGAP); W.p(40, d.DIMSCALE || 1); W.p(73, 0); W.p(74, 0); W.p(77, d.DIMTAD || 0);
+      W.p(78, d.DIMZIN || 0); W.p(271, d.DIMDEC === undefined ? 2 : d.DIMDEC);
+      W.p(179, d.DIMADEC || 0); W.p(144, d.DIMLFAC || 1);
+      W.p(176, d.DIMCLRD || 0); W.p(177, d.DIMCLRE || 0); W.p(178, d.DIMCLRT || 0);
+      if (r2000) { W.p(340, W.fixed.placeholder); }
+    });
+    W.p(0, 'ENDTAB');
+
+    /* BLOCK_RECORD */
+    if (r2000) {
+      var brNames = Object.keys(handles.blockRecs);
+      startTable(W, 'BLOCK_RECORD', handles.blockRecordTable, brNames.length + 2);
+      [['*Model_Space', handles.modelRec], ['*Paper_Space', handles.paperRec]].forEach(function (pr) {
+        W.p(0, 'BLOCK_RECORD'); W.p(5, pr[1]); W.p(330, handles.blockRecordTable);
+        W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbBlockTableRecord'); W.p(2, pr[0]); W.p(70, 0);
+      });
+      brNames.forEach(function (n) {
+        W.p(0, 'BLOCK_RECORD'); W.p(5, handles.blockRecs[n]); W.p(330, handles.blockRecordTable);
+        W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbBlockTableRecord'); W.p(2, n); W.p(70, 0);
+      });
+      W.p(0, 'ENDTAB');
+    }
+    W.p(0, 'ENDSEC');
+
+    /* ---------------- BLOCKS ---------------- */
+    W.p(0, 'SECTION'); W.p(2, 'BLOCKS');
+    writeBlock(W, doc, '*Model_Space', { x: 0, y: 0 }, [], r2000 ? handles.modelRec : null);
+    writeBlock(W, doc, '*Paper_Space', { x: 0, y: 0 }, [], r2000 ? handles.paperRec : null);
+    Object.keys(doc.blocks).forEach(function (n) {
+      var b = doc.blocks[n];
+      writeBlock(W, doc, n, b.base, b.entities, r2000 ? handles.blockRecs[n] : null);
+    });
+    dimBlocks.forEach(function (d) {
+      writeBlock(W, doc, d.name, { x: 0, y: 0 }, d.geo, r2000 ? handles.blockRecs[d.name] : null, 1);
+    });
+    W.p(0, 'ENDSEC');
+
+    /* ---------------- ENTITIES ---------------- */
+    W.p(0, 'SECTION'); W.p(2, 'ENTITIES');
+    var owner = r2000 ? handles.modelRec : null;
+    var di = 0;
+    doc.entities.forEach(function (e) {
+      if (e.type === 'DIMENSION') { di++; W.dimension(e, doc, owner, '*D' + di); return; }
+      if (e.type === 'LEADER') {
+        CAD.Dim.explode(e, doc).forEach(function (g) { W.entity(g, doc, owner); });
+        return;
+      }
+      W.entity(e, doc, owner);
+    });
+    W.p(0, 'ENDSEC');
+
+    /* ---------------- OBJECTS ---------------- */
+    if (r2000) {
+      W.p(0, 'SECTION'); W.p(2, 'OBJECTS');
+      W.p(0, 'DICTIONARY'); W.p(5, W.fixed.nod); W.p(330, 0); W.p(100, 'AcDbDictionary'); W.p(281, 1);
+      W.p(3, 'ACAD_GROUP'); W.p(350, W.fixed.groupDict);
+      W.p(3, 'ACAD_PLOTSTYLENAME'); W.p(350, W.fixed.psDict);
+      W.p(0, 'DICTIONARY'); W.p(5, W.fixed.groupDict); W.p(330, W.fixed.nod); W.p(100, 'AcDbDictionary'); W.p(281, 1);
+      W.p(0, 'ACDBDICTIONARYWDFLT'); W.p(5, W.fixed.psDict); W.p(330, W.fixed.nod);
+      W.p(100, 'AcDbDictionary'); W.p(281, 1); W.p(3, 'Normal'); W.p(350, W.fixed.placeholder);
+      W.p(100, 'AcDbDictionaryWithDefault'); W.p(340, W.fixed.placeholder);
+      W.p(0, 'ACDBPLACEHOLDER'); W.p(5, W.fixed.placeholder); W.p(330, W.fixed.psDict);
+      W.p(0, 'ENDSEC');
+    }
+
+    W.p(0, 'EOF');
+    return W.text();
+  };
+
+  function startTable(W, name, handle, count) {
+    W.p(0, 'TABLE'); W.p(2, name);
+    if (W.r2000) { W.p(5, handle); W.p(330, 0); W.p(100, 'AcDbSymbolTable'); }
+    W.p(70, count);
+  }
+
+  function writeBlock(W, doc, name, base, ents, recHandle, anon) {
+    W.p(0, 'BLOCK');
+    if (W.r2000) {
+      W.p(5, W.h()); if (recHandle) W.p(330, recHandle);
+      W.p(100, 'AcDbEntity'); W.p(8, '0'); W.p(100, 'AcDbBlockBegin');
+    } else W.p(8, '0');
+    W.p(2, W.r2000 ? name : name.toUpperCase());
+    W.p(70, anon ? 1 : 0);
+    W.p(10, base.x); W.p(20, base.y); W.p(30, 0);
+    W.p(3, W.r2000 ? name : name.toUpperCase());
+    W.p(1, '');
+    ents.forEach(function (e) {
+      if (e.type === 'DIMENSION' || e.type === 'LEADER') {
+        CAD.Dim.explode(e, doc).forEach(function (g) { W.entity(g, doc, recHandle); });
+      } else W.entity(e, doc, recHandle);
+    });
+    W.p(0, 'ENDBLK');
+    if (W.r2000) {
+      W.p(5, W.h()); if (recHandle) W.p(330, recHandle);
+      W.p(100, 'AcDbEntity'); W.p(8, '0'); W.p(100, 'AcDbBlockEnd');
+    } else W.p(8, '0');
+  }
+
+  /* ============================================================
+     LECTURA
+     ============================================================ */
+  function isFloatCode(c) {
+    return (c >= 10 && c <= 59) || (c >= 110 && c <= 149) || (c >= 210 && c <= 239) ||
+           (c >= 460 && c <= 469) || (c >= 1010 && c <= 1059);
+  }
+  function isIntCode(c) {
+    return (c >= 60 && c <= 79) || (c >= 90 && c <= 99) || (c >= 170 && c <= 179) ||
+           (c >= 270 && c <= 289) || (c >= 370 && c <= 389) || (c >= 400 && c <= 409) ||
+           (c >= 1060 && c <= 1070);
+  }
+
+  DXF.parsePairs = function (txt) {
+    var lines = txt.split(/\r\n|\r|\n/);
+    var pairs = [];
+    for (var i = 0; i + 1 < lines.length; i += 2) {
+      var c = parseInt(lines[i].trim(), 10);
+      if (isNaN(c)) { i--; continue; }
+      var v = lines[i + 1];
+      if (isFloatCode(c)) v = parseFloat(v);
+      else if (isIntCode(c)) v = parseInt(v, 10) | 0;
+      else v = (v === undefined ? '' : v).trim();
+      pairs.push([c, v]);
+    }
+    return pairs;
+  };
+
+  DXF.read = function (txt) {
+    var pairs = DXF.parsePairs(txt);
+    var doc = new CAD.Doc();
+    doc.layerOrder = []; doc.layers = {}; doc.addLayer({ name: '0', color: 7, ltype: 'CONTINUOUS' });
+    var i = 0, n = pairs.length;
+    var warnings = [];
+
+    function section(name) {
+      /* devuelve el índice donde empieza la sección o -1 */
+      for (var k = 0; k < n - 1; k++) {
+        if (pairs[k][0] === 0 && pairs[k][1] === 'SECTION' && pairs[k + 1][0] === 2 && pairs[k + 1][1] === name) return k + 2;
+      }
+      return -1;
+    }
+
+    /* --- HEADER --- */
+    var hs = section('HEADER');
+    if (hs >= 0) {
+      for (var k = hs; k < n; k++) {
+        if (pairs[k][0] === 0 && pairs[k][1] === 'ENDSEC') break;
+        if (pairs[k][0] === 9) {
+          var vn = pairs[k][1], nx = pairs[k + 1];
+          if (!nx) continue;
+          if (vn === '$LTSCALE') doc.vars.LTSCALE = nx[1];
+          else if (vn === '$TEXTSIZE') doc.vars.TEXTSIZE = nx[1];
+          else if (vn === '$CLAYER') doc.vars.CLAYER = String(nx[1]);
+          else if (vn === '$INSUNITS') doc.vars.INSUNITS = nx[1];
+          else if (vn === '$PDMODE') doc.vars.PDMODE = nx[1];
+          else if (vn === '$PDSIZE') doc.vars.PDSIZE = nx[1];
+          else if (vn === '$LUPREC') doc.vars.LUPREC = nx[1];
+          else if (vn === '$DIMSCALE') doc.vars.DIMSCALE = nx[1];
+          else if (vn === '$LIMMAX') doc.vars.LIMMAX = { x: pairs[k + 1][1], y: pairs[k + 2][1] };
+        }
+      }
+    }
+
+    /* --- TABLES --- */
+    var ts = section('TABLES');
+    if (ts >= 0) {
+      var cur = null, rec = null, curTable = null;
+      for (var t = ts; t < n; t++) {
+        var c = pairs[t][0], v = pairs[t][1];
+        if (c === 0) {
+          flushRec();
+          if (v === 'ENDSEC') break;
+          if (v === 'TABLE') { curTable = null; continue; }
+          if (v === 'ENDTAB') { curTable = null; continue; }
+          if (v === 'LAYER' || v === 'LTYPE' || v === 'STYLE' || v === 'DIMSTYLE') { rec = { t: v }; }
+          else rec = null;
+          continue;
+        }
+        if (!rec) {
+          if (c === 2 && !curTable) curTable = v;
+          continue;
+        }
+        if (c === 2) rec.name = String(v);
+        else if (c === 70) rec.flags = v;
+        else if (c === 62) rec.color = v;
+        else if (c === 6) rec.ltype = String(v);
+        else if (c === 370) rec.lw = v;
+        else if (c === 290) rec.plot = !!v;
+        else if (c === 3) rec.desc = String(v);
+        else if (c === 49) { (rec.pat = rec.pat || []).push(v); }
+        else if (c === 40) rec.h = v;
+        else if (c === 41) rec.wfac = v;
+        else if (c === 50) rec.oblique = v;
+        else if (c === 140) rec.DIMTXT = v;
+        else if (c === 41 && rec.t === 'DIMSTYLE') rec.DIMASZ = v;
+      }
+      function flushRec() {
+        if (!rec || !rec.name) { rec = null; return; }
+        if (rec.t === 'LAYER') {
+          doc.addLayer({
+            name: rec.name,
+            on: (rec.color === undefined ? 7 : rec.color) >= 0,
+            frozen: !!(rec.flags & 1), locked: !!(rec.flags & 4),
+            color: Math.abs(rec.color === undefined ? 7 : rec.color) || 7,
+            ltype: rec.ltype || 'CONTINUOUS',
+            lw: rec.lw === undefined ? -3 : rec.lw,
+            plot: rec.plot === undefined ? true : rec.plot
+          });
+        } else if (rec.t === 'LTYPE') {
+          if (rec.name !== 'ByLayer' && rec.name !== 'ByBlock' && rec.name.toUpperCase() !== 'BYLAYER' && rec.name.toUpperCase() !== 'BYBLOCK') {
+            doc.ltypes[rec.name] = { name: rec.name, desc: rec.desc || '', pat: rec.pat || [] };
+          }
+        } else if (rec.t === 'STYLE') {
+          doc.textStyles[rec.name] = {
+            name: rec.name, font: rec.font || 'txt.shx', h: rec.h || 0,
+            wfac: rec.wfac || 1, oblique: rec.oblique || 0,
+            css: /arial|simplex|romans|isocp/i.test(rec.font || '') ? 'Arial' : 'AcadStick'
+          };
+        } else if (rec.t === 'DIMSTYLE') {
+          var ds = E.defaultDimStyle(rec.name);
+          if (rec.DIMTXT) ds.DIMTXT = rec.DIMTXT;
+          doc.dimStyles[rec.name] = ds;
+        }
+        rec = null;
+      }
+    }
+
+    /* --- BLOCKS --- */
+    var bs = section('BLOCKS');
+    if (bs >= 0) {
+      var bi = bs;
+      while (bi < n) {
+        if (pairs[bi][0] === 0 && pairs[bi][1] === 'ENDSEC') break;
+        if (pairs[bi][0] === 0 && pairs[bi][1] === 'BLOCK') {
+          var hdr = {}, j = bi + 1;
+          while (j < n && pairs[j][0] !== 0) {
+            if (pairs[j][0] === 2) hdr.name = String(pairs[j][1]);
+            else if (pairs[j][0] === 10) hdr.bx = pairs[j][1];
+            else if (pairs[j][0] === 20) hdr.by = pairs[j][1];
+            else if (pairs[j][0] === 70) hdr.flags = pairs[j][1];
+            j++;
+          }
+          var endIdx = j;
+          while (endIdx < n && !(pairs[endIdx][0] === 0 && pairs[endIdx][1] === 'ENDBLK')) endIdx++;
+          var ents = readEntities(pairs, j, endIdx, doc, warnings);
+          if (hdr.name && hdr.name.toUpperCase().indexOf('*MODEL_SPACE') < 0 && hdr.name.toUpperCase().indexOf('*PAPER_SPACE') < 0) {
+            doc.blocks[hdr.name] = { name: hdr.name, base: { x: hdr.bx || 0, y: hdr.by || 0 }, entities: ents, anon: !!(hdr.flags & 1) };
+          }
+          bi = endIdx + 1;
+        } else bi++;
+      }
+    }
+
+    /* --- ENTITIES --- */
+    var es = section('ENTITIES');
+    if (es >= 0) {
+      var ee = es;
+      while (ee < n && !(pairs[ee][0] === 0 && pairs[ee][1] === 'ENDSEC')) ee++;
+      readEntities(pairs, es, ee, doc, warnings).forEach(function (e) { doc.add(e); });
+    }
+
+    /* capas referenciadas pero no declaradas */
+    doc.entities.forEach(function (e) { if (!doc.layers[e.layer]) doc.addLayer({ name: e.layer, color: 7 }); });
+    doc.warnings = warnings;
+    return doc;
+  };
+
+  /* Lee un rango de entidades */
+  function readEntities(pairs, from, to, doc, warnings) {
+    var out = [], i = from;
+    while (i < to) {
+      if (pairs[i][0] !== 0) { i++; continue; }
+      var type = pairs[i][1];
+      if (type === 'ENDSEC' || type === 'ENDBLK') break;
+      var j = i + 1;
+      var d = { _codes: [] };
+      while (j < to && pairs[j][0] !== 0) { d._codes.push(pairs[j]); j++; }
+      var ent = null;
+      try { ent = buildEntity(type, d._codes, pairs, i, to, doc); } catch (err) { ent = null; }
+      if (ent) {
+        if (Array.isArray(ent)) { ent.forEach(function (x) { out.push(x); }); }
+        else out.push(ent);
+      } else if (type !== 'SEQEND' && type !== 'VERTEX' && warnings) {
+        if (warnings.indexOf(type) < 0 && warnings.length < 12) warnings.push(type);
+      }
+      /* POLYLINE consume sus VERTEX */
+      if (type === 'POLYLINE') {
+        var k = j;
+        while (k < to && !(pairs[k][0] === 0 && pairs[k][1] === 'SEQEND')) k++;
+        i = k + 1;
+      } else i = j;
+    }
+    return out;
+  }
+
+  function get(codes, code, def) {
+    for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) return codes[i][1];
+    return def;
+  }
+  function getAll(codes, code) {
+    var o = [];
+    for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) o.push(codes[i][1]);
+    return o;
+  }
+  function common(codes) {
+    var o = { layer: String(get(codes, 8, '0')), ltscale: get(codes, 48, 1) };
+    var c = get(codes, 62, undefined);
+    o.color = c === undefined ? 256 : (c < 0 ? 256 : c);
+    var tc = get(codes, 420, undefined);
+    if (tc !== undefined) o.color = { rgb: [(tc >> 16) & 255, (tc >> 8) & 255, tc & 255] };
+    var lt = get(codes, 6, undefined);
+    o.ltype = lt === undefined ? 'ByLayer' : String(lt);
+    var lw = get(codes, 370, undefined);
+    o.lw = lw === undefined ? -1 : lw;
+    return o;
+  }
+
+  function buildEntity(type, codes, pairs, idx, to, doc) {
+    var o = common(codes);
+    switch (type) {
+      case 'LINE':
+        return E.line({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, { x: get(codes, 11, 0), y: get(codes, 21, 0) }, o);
+      case 'CIRCLE':
+        return E.circle({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 1), o);
+      case 'ARC':
+        return E.arc({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 1),
+          G.rad(get(codes, 50, 0)), G.rad(get(codes, 51, 90)), o);
+      case 'POINT':
+        return E.point({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, o);
+      case 'ELLIPSE':
+        return E.ellipse({ x: get(codes, 10, 0), y: get(codes, 20, 0) },
+          { x: get(codes, 11, 1), y: get(codes, 21, 0) }, get(codes, 40, 1),
+          get(codes, 41, 0), get(codes, 42, G.TAU), o);
+      case 'LWPOLYLINE': {
+        var xs = [], ys = [], bs = [];
+        codes.forEach(function (c) {
+          if (c[0] === 10) { xs.push(c[1]); bs.push(0); }
+          else if (c[0] === 20) ys.push(c[1]);
+          else if (c[0] === 42) bs[xs.length - 1] = c[1];
+        });
+        var verts = xs.map(function (x, k) { return { x: x, y: ys[k] || 0, b: bs[k] || 0 }; });
+        if (verts.length < 2) return null;
+        var pl = E.pline(verts, !!(get(codes, 70, 0) & 1), o);
+        pl.width = get(codes, 43, 0);
+        return pl;
+      }
+      case 'POLYLINE': {
+        var flags = get(codes, 70, 0);
+        var vs = [], k = idx + 1;
+        while (k < to) {
+          if (pairs[k][0] === 0) {
+            if (pairs[k][1] === 'SEQEND') break;
+            if (pairs[k][1] === 'VERTEX') {
+              var vc = [], m = k + 1;
+              while (m < to && pairs[m][0] !== 0) { vc.push(pairs[m]); m++; }
+              var vf = get(vc, 70, 0);
+              if (!(vf & 16) && !(vf & 8) || true) {
+                vs.push({ x: get(vc, 10, 0), y: get(vc, 20, 0), b: get(vc, 42, 0) });
+              }
+              k = m; continue;
+            }
+          }
+          k++;
+        }
+        if (vs.length < 2) return null;
+        return E.pline(vs, !!(flags & 1), o);
+      }
+      case 'SPLINE': {
+        var fx = [], fy = [], cx = [], cy = [];
+        codes.forEach(function (c) {
+          if (c[0] === 11) fx.push(c[1]); else if (c[0] === 21) fy.push(c[1]);
+          else if (c[0] === 10) cx.push(c[1]); else if (c[0] === 20) cy.push(c[1]);
+        });
+        var fit = fx.map(function (x, k2) { return { x: x, y: fy[k2] || 0 }; });
+        var ctrl = cx.map(function (x, k2) { return { x: x, y: cy[k2] || 0 }; });
+        var pts = fit.length >= 2 ? fit : ctrl;
+        if (pts.length < 2) return null;
+        var sp = E.spline(pts, !!(get(codes, 70, 0) & 1), o);
+        if (!fit.length) sp.ctrl = ctrl;
+        return sp;
+      }
+      case 'TEXT': {
+        var ha = get(codes, 72, 0), va = get(codes, 73, 0);
+        var p = { x: get(codes, 10, 0), y: get(codes, 20, 0) };
+        var p2 = { x: get(codes, 11, undefined), y: get(codes, 21, undefined) };
+        if ((ha || va) && p2.x !== undefined) p = p2;
+        var te = E.text(p, get(codes, 40, 2.5), unescapeTxt(String(get(codes, 1, ''))), G.rad(get(codes, 50, 0)), o);
+        te.style = String(get(codes, 7, 'Standard'));
+        te.halign = ha; te.valign = va;
+        te.wfac = get(codes, 41, 1); te.oblique = get(codes, 51, 0);
+        return te;
+      }
+      case 'MTEXT': {
+        var chunks = getAll(codes, 3).join('') + String(get(codes, 1, ''));
+        var mt = E.mtext({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
+          unescapeTxt(chunks), get(codes, 41, 0), o);
+        mt.attach = get(codes, 71, 1);
+        mt.style = String(get(codes, 7, 'Standard'));
+        var rx = get(codes, 11, undefined);
+        mt.rot = rx !== undefined && get(codes, 50, undefined) === undefined
+          ? Math.atan2(get(codes, 21, 0), rx) : G.rad(get(codes, 50, 0));
+        return mt;
+      }
+      case 'INSERT': {
+        var ins = E.insert(String(get(codes, 2, '')), { x: get(codes, 10, 0), y: get(codes, 20, 0) }, o);
+        ins.sx = get(codes, 41, 1); ins.sy = get(codes, 42, 1);
+        ins.rot = G.rad(get(codes, 50, 0));
+        return ins;
+      }
+      case 'SOLID': case 'TRACE': case '3DFACE': {
+        var q0 = { x: get(codes, 10, 0), y: get(codes, 20, 0) };
+        var q1 = { x: get(codes, 11, 0), y: get(codes, 21, 0) };
+        var q2 = { x: get(codes, 12, 0), y: get(codes, 22, 0) };
+        var q3 = { x: get(codes, 13, undefined), y: get(codes, 23, undefined) };
+        var pts;
+        if (type === '3DFACE') pts = q3.x === undefined ? [q0, q1, q2] : [q0, q1, q2, q3];
+        else pts = (q3.x === undefined || (Math.abs(q3.x - q2.x) < 1e-9 && Math.abs(q3.y - q2.y) < 1e-9))
+          ? [q0, q1, q2] : [q0, q1, q3, q2];
+        return E.solid(pts, o);
+      }
+      case 'HATCH': {
+        var loops = [], curLoop = null, mode = 0;
+        var px = null;
+        var pattern = String(get(codes, 2, 'ANSI31'));
+        var isSolid = !!get(codes, 70, 0);
+        for (var z = 0; z < codes.length; z++) {
+          var cc = codes[z][0], vv = codes[z][1];
+          if (cc === 92) { if (curLoop && curLoop.length > 2) loops.push(curLoop); curLoop = []; mode = 1; px = null; }
+          else if (cc === 93) { /* número de vértices */ }
+          else if (cc === 10 && mode === 1) px = vv;
+          else if (cc === 20 && mode === 1 && px !== null) { curLoop.push({ x: px, y: vv }); px = null; }
+          else if (cc === 97) { if (curLoop && curLoop.length > 2) { loops.push(curLoop); } curLoop = null; mode = 0; }
+          else if (cc === 75) mode = 0;
+        }
+        if (curLoop && curLoop.length > 2) loops.push(curLoop);
+        if (!loops.length) return null;
+        var ha2 = E.hatch(loops, o);
+        ha2.pattern = isSolid ? 'SOLID' : pattern;
+        ha2.solid = isSolid;
+        ha2.angle = G.rad(get(codes, 52, 0));
+        ha2.scale = get(codes, 41, 1) || 1;
+        return ha2;
+      }
+      case 'DIMENSION': {
+        /* se importa como referencia al bloque de geometría generado */
+        var bn = String(get(codes, 2, ''));
+        if (bn && doc.blocks[bn]) {
+          var ie = E.insert(bn, { x: 0, y: 0 }, o);
+          ie.__dim = true;
+          return ie;
+        }
+        return null;
+      }
+      case 'LEADER': {
+        var lx = getAll(codes, 10), ly = getAll(codes, 20);
+        if (lx.length < 2) return null;
+        var pts2 = lx.map(function (x, k3) { return { x: x, y: ly[k3] || 0 }; });
+        return E.leader(pts2, '', o);
+      }
+      case 'ATTDEF': {
+        var ad = E.attdef({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
+          String(get(codes, 2, 'ETIQUETA')), unescapeTxt(String(get(codes, 3, ''))),
+          unescapeTxt(String(get(codes, 1, ''))), o);
+        ad.rot = G.rad(get(codes, 50, 0));
+        ad.style = String(get(codes, 7, 'Standard'));
+        ad.halign = get(codes, 72, 0); ad.valign = get(codes, 74, 0);
+        ad.flags = get(codes, 70, 0);
+        if (ad.halign || ad.valign) {
+          var q = { x: get(codes, 11, undefined), y: get(codes, 21, undefined) };
+          if (q.x !== undefined) ad.p = q;
+        }
+        return ad;
+      }
+      case 'ATTRIB': {
+        /* se importa como texto: conserva el aspecto sin depender del INSERT */
+        var av = E.text({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
+          unescapeTxt(String(get(codes, 1, ''))), G.rad(get(codes, 50, 0)), o);
+        av.style = String(get(codes, 7, 'Standard'));
+        av.halign = get(codes, 72, 0); av.valign = get(codes, 74, 0);
+        if (av.halign || av.valign) {
+          var q2 = { x: get(codes, 11, undefined), y: get(codes, 21, undefined) };
+          if (q2.x !== undefined) av.p = q2;
+        }
+        return av;
+      }
+      default: return null;
+    }
+  }
+
+  function unescapeTxt(s) {
+    return String(s)
+      .replace(/\\P/g, '\n')
+      .replace(/\\[A-Za-z][^;\\]*;/g, '')
+      .replace(/[{}]/g, '')
+      .replace(/%%d/gi, '°').replace(/%%c/gi, 'Ø').replace(/%%p/gi, '±')
+      .replace(/%%%/g, '%');
+  }
+  DXF.unescapeTxt = unescapeTxt;
+})();
