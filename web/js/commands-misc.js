@@ -113,6 +113,7 @@
       var sel = await ctx.getSelection('Designe objetos en la(s) capa(s) afectada(s)', { force: true });
       if (!sel || !sel.length) return;
       ctx.doc.mark(title);
+      ctx.app.pushLayerState();
       var done = {};
       sel.forEach(function (e) {
         if (done[e.layer]) return;
@@ -133,6 +134,7 @@
     var sel = await ctx.getSelection('Designe objetos en la(s) capa(s) que se aislarán', { force: true });
     if (!sel || !sel.length) return;
     ctx.doc.mark('AISLACAPA');
+    ctx.app.pushLayerState();
     var keep = {};
     sel.forEach(function (e) { keep[e.layer] = 1; });
     ctx.doc.layerList().forEach(function (l) { if (!keep[l.name]) l.on = false; });
@@ -143,12 +145,14 @@
 
   Cmd.add(['ACTCAPAS', 'LAYON'], { group: 'layer', title: 'Activar todas las capas' }, async function (ctx) {
     ctx.doc.mark('ACTCAPAS');
+    ctx.app.pushLayerState();
     ctx.doc.layerList().forEach(function (l) { l.on = true; });
     ctx.out('Se han activado todas las capas.');
     ctx.app.refresh();
   });
   Cmd.add(['REUTCAPAS', 'LAYTHW'], { group: 'layer', title: 'Reutilizar todas las capas' }, async function (ctx) {
     ctx.doc.mark('REUTCAPAS');
+    ctx.app.pushLayerState();
     ctx.doc.layerList().forEach(function (l) { l.frozen = false; });
     ctx.out('Se han reutilizado todas las capas.');
     ctx.app.refresh();

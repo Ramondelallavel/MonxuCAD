@@ -143,6 +143,7 @@
   S.find = function (app, sp, opts) {
     opts = opts || {};
     var doc = app.doc, r = app.r;
+    if (opts.override === 'none') return null;
     if (!app.osnapOn && !opts.override) return null;
     var ap = (doc.vars.APERTURE || 10);
     var wp = r.s2w(sp);
@@ -298,7 +299,17 @@
     var snap = null;
 
     if (!opts.noOsnap) snap = S.find(app, sp, { base: base, override: app.osnapOverride });
+    if (CAD.Track) CAD.Track.update(app, snap);
     if (snap) return { p: snap.p, snap: snap, tracks: tracks };
+
+    /* rastreo de referencia a objetos */
+    if (CAD.Track && !opts.noConstraint) {
+      var tr = CAD.Track.resolve(app, sp, base);
+      if (tr) {
+        if (base) tr.tracks.push({ p1: base, p2: tr.p, color: CAD.THEME.polar, dash: [5, 5] });
+        return { p: tr.p, snap: null, tracks: tr.tracks, label: tr.label, tracking: true };
+      }
+    }
 
     if (doc.vars.SNAPMODE && !opts.noGrid) raw = S.applyGridSnap(doc, raw);
 
@@ -314,8 +325,12 @@
           var scr = r.w2s(pol.p), cur = sp;
           if (G.dist(scr, cur) <= 12) {
             var far = G.polar(base, pol.ang, Math.max(G.dist(base, pol.p) * 1.35, (r.W + r.H) / r.view.zoom * 0.08));
-            tracks.push({ p1: base, p2: far, color: CAD.THEME.polar });
-            return { p: pol.p, snap: null, tracks: tracks, ang: pol.ang, polar: true };
+            tracks.push({ p1: base, p2: far, color: CAD.THEME.polar, dash: [7, 5] });
+            return {
+              p: pol.p, snap: null, tracks: tracks, ang: pol.ang, polar: true,
+              label: 'Polar:  ' + G.fmt(G.dist(base, pol.p), 2) + ' < ' +
+                G.fmt(G.deg(G.na(pol.ang - (doc.vars.UCSANG || 0))), 0) + '\u00b0'
+            };
           }
         }
       }

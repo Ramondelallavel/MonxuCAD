@@ -73,8 +73,33 @@
   /* ============================================================
      Constructor principal
      ============================================================ */
+  /* ------------------------------------------------------------
+     Asociatividad: si la cota guarda vínculos a objetos, sus puntos
+     de definición se recalculan a partir de la geometría actual.
+     ------------------------------------------------------------ */
+  D.syncAssoc = function (ent, doc) {
+    if (!ent.assoc) return;
+    var keys = Object.keys(ent.assoc), alive = 0;
+    keys.forEach(function (k) {
+      var ref = ent.assoc[k];
+      if (!ref) return;
+      var src = doc.byId(ref.id);
+      if (!src) return;
+      var pts = E.snapPoints(src, doc).filter(function (s) { return s.type === ref.type; });
+      var q = pts[ref.i];
+      if (!q) return;
+      ent[k] = { x: q.p.x, y: q.p.y };
+      alive++;
+      if (k === 'p1' && ent.center && (ent.kind === 'radius' || ent.kind === 'diameter')) {
+        if (src.c) ent.center = { x: src.c.x, y: src.c.y };
+      }
+    });
+    if (!alive) delete ent.assoc;
+  };
+
   D.build = function (ent, doc) {
     if (ent.type === 'LEADER') return D.buildLeader(ent, doc);
+    D.syncAssoc(ent, doc);
     var st = D.style(ent, doc);
     var geo = D.buildKind(ent, doc, st);
     D.addTolerance(geo, st);

@@ -50,7 +50,7 @@
       PICKBOX: 4, APERTURE: 10, GRIPSIZE: 5, CURSORSIZE: 5, DYNMODE: 1,
       LIMMIN: { x: 0, y: 0 }, LIMMAX: { x: 420, y: 297 }, LIMCHECK: 0,
       UCSORG: { x: 0, y: 0 }, UCSANG: 0, ANGBASE: 0, ANGDIR: 0,
-      SELECTIONCYCLING: 0, HPNAME: 'ANSI31', HPSCALE: 1, HPANG: 0
+      SELECTIONCYCLING: 2, MIRRTEXT: 0, CANNOSCALE: '1:1', HPNAME: 'ANSI31', HPSCALE: 1, HPANG: 0
     };
     this.init();
   }
@@ -536,11 +536,12 @@
       case 'TEXT': case 'ATTDEF': case 'ATTRIB':
         ent.p = G.mApply(m, ent.p);
         if (ent.p2) ent.p2 = G.mApply(m, ent.p2);
-        ent.h *= sf; ent.rot += rot;
-        if (mir) ent.rot = Math.PI - ent.rot + 2 * rot;
+        ent.h *= sf;
+        ent.rot = mir ? E.mirrorTextRot(ent.rot, m, doc) : ent.rot + rot;
         break;
       case 'MTEXT':
-        ent.p = G.mApply(m, ent.p); ent.h *= sf; ent.width *= sf; ent.rot += rot;
+        ent.p = G.mApply(m, ent.p); ent.h *= sf; ent.width *= sf;
+        ent.rot = mir ? E.mirrorTextRot(ent.rot, m, doc) : ent.rot + rot;
         break;
       case 'INSERT':
         ent.p = G.mApply(m, ent.p); ent.sx *= mir ? -sf : sf; ent.sy *= sf; ent.rot += rot;
@@ -561,6 +562,20 @@
         break;
     }
     return ent;
+  };
+
+  /* Rotación de un texto al reflejarlo.
+     MIRRTEXT = 0 (por defecto): el texto sigue leyéndose del derecho.
+     MIRRTEXT = 1: el texto se refleja como el resto de la geometría. */
+  E.mirrorTextRot = function (rot, m, doc) {
+    var d = G.mApplyVec(m, { x: Math.cos(rot), y: Math.sin(rot) });
+    var a = Math.atan2(d.y, d.x);
+    if (!(doc && doc.vars && doc.vars.MIRRTEXT)) {
+      var n = G.na(a);
+      if (n > Math.PI / 2 + 1e-9 && n < 1.5 * Math.PI - 1e-9) a = n - Math.PI;
+      else a = n;
+    }
+    return a;
   };
 
   E.move = function (ent, dx, dy, doc) { return E.transform(ent, G.mTrans(dx, dy), doc); };

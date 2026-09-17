@@ -254,6 +254,8 @@
 
     this.out(def.name, 'echo');
     this.lastCommand = def.name;
+    this.cmdSeq = (this.cmdSeq || 0) + 1;
+    var mySeq = this.cmdSeq;
     this.activeCmd = def;
     this.cmdStartSel = this.selSet.slice();
     var ctx = new Ctx(this, def);
@@ -263,30 +265,41 @@
     Promise.resolve()
       .then(function () { return def.fn(ctx, args || []); })
       .then(function (r) {
-        app.finishCommand();
+        app.finishCommand(mySeq);
         if (r && r.msg) app.out(r.msg);
       })
       .catch(function (e) {
         if (e === CANCEL || (e && e.cancel)) app.out('*Cancelado*', 'warn');
         else { app.out('Error en ' + def.name + ': ' + (e && e.message ? e.message : e), 'err'); if (e && e.stack) console.error(e); }
-        app.finishCommand();
+        app.finishCommand(mySeq);
       });
   };
 
-  Engine.finishCommand = function () {
+  Engine.finishCommand = function (seq) {
+    /* si entretanto se inició otro comando, no se toca su estado */
+    if (seq !== undefined && seq !== this.cmdSeq) return;
     this.pending = null;
     this.activeCmd = null;
     this.activeCtx = null;
     this.preview = [];
     this.rubber = null;
     this.trackLines = null;
+    this.trackLabel = null;
     this.osnapOverride = null;
+    if (CAD.Track) CAD.Track.clear();
     this.setPrompt('Comando: ');
     if (this.ui && this.ui.setActiveCommand) this.ui.setActiveCommand('');
     this.refresh();
+    if (this.multipleCmd) {
+      var nm = this.multipleCmd, self = this;
+      setTimeout(function () { if (self.multipleCmd === nm && !self.pending) self.startCommand(nm); }, 0);
+    }
   };
 
   Engine.cancel = function (silent) {
+    this.mtpCollect = null;
+    this.osnapOverride = null;
+    this.multipleCmd = null;
     if (this.pending) {
       var rj = this.pending.reject;
       this.pending = null;
@@ -388,6 +401,24 @@
   Engine.acceptPoint = function (pt) {
     var p = this.pending;
     if (!p) return;
+    /* referencia "punto medio entre 2 puntos" */
+    if (this.mtpCollect) {
+      this.mtpCollect.push({ x: pt.x, y: pt.y });
+      if (this.mtpCollect.length < 2) {
+        this.setPrompt('Segundo punto del medio: ');
+        this.refresh();
+        return;
+      }
+      var a = this.mtpCollect[0], b = this.mtpCollect[1];
+      this.mtpCollect = null;
+      pt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      this.setPrompt(p.text);
+    }
+    /* referencia a objeto usada: permite cotas asociativas */
+    this.lastSnapRef = (this.snapHit && this.snapHit.ent)
+      ? { ent: this.snapHit.ent, type: this.snapHit.type, p: { x: this.snapHit.p.x, y: this.snapHit.p.y } }
+      : null;
+    this.osnapOverride = null;
     this.lastPoint = { x: pt.x, y: pt.y };
     if (p.opts.base) this.lastDir = G.ang(p.opts.base, pt);
     this.resolve({ x: pt.x, y: pt.y });
@@ -421,6 +452,19 @@
   };
 
   /* ---------- Clic en el área gráfica ---------- */
+  /* Convierte la última referencia en un vínculo estable {id, type, i} */
+  Engine.assocRef = function (p) {
+    var r = this.lastSnapRef;
+    this.lastSnapRef = null;
+    if (!r || !r.ent || !r.ent.id) return null;
+    if (G.dist(r.p, p) > 1e-6) return null;
+    var pts = CAD.E.snapPoints(r.ent, this.doc).filter(function (s) { return s.type === r.type; });
+    for (var i = 0; i < pts.length; i++) {
+      if (G.dist(pts[i].p, p) < 1e-6) return { id: r.ent.id, type: r.type, i: i };
+    }
+    return null;
+  };
+
   Engine.feedPick = function (sp, wp, ent) {
     var p = this.pending;
     if (!p) return false;

@@ -383,13 +383,38 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   position: absolute;
   z-index: 6;
   pointer-events: none;
-  background: rgba(255,255,225,.95);
+  background: rgba(255,255,225,.96);
   color: #222;
   border: 1px solid #b9b98f;
   padding: 1px 5px;
   font-size: 11px;
-  white-space: nowrap;
+  white-space: pre-line;
+  line-height: 1.35;
+  font-family: var(--font-mono);
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
 }
+
+#rollover {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  background: rgba(32,36,42,.96);
+  border: 1px solid var(--edge-soft);
+  color: var(--ink);
+  padding: 4px 7px;
+  font-size: 11px;
+  box-shadow: 0 3px 10px rgba(0,0,0,.45);
+  max-width: 280px;
+}
+#rollover b { color: #7fc3ff; }
+#rollover table { border-collapse: collapse; }
+#rollover td { padding: 0 6px 0 0; white-space: nowrap; }
+#rollover td.k { color: var(--ink-mute); }
+
+.kwlink { color: #6fb3f0; cursor: pointer; }
+.kwlink:hover { color: #a8d5ff; text-decoration: underline; }
+
+.cyc-item .sw { width: 11px; height: 11px; border: 1px solid #000; display: inline-block; flex: none; }
 
 #toast {
   position: absolute;

@@ -17,6 +17,8 @@
     this.hoverGrip = null;
     this.hotGrip = null;
     this.gripDrag = null;
+    this.gripMode = 0;
+    this.gripCopy = false;
     this.osnapOn = true;
     this.osnapOverride = null;
     this.showCross = true;
@@ -195,20 +197,25 @@
 
       self.updateCursor(sp, e);
 
-      /* pinzamiento activo */
-      if (self.gripDrag) {
-        self.applyGrip(self.cursorWorld);
-        return;
-      }
+      /* pinzamiento bajo el cursor: entra en modo de edición */
       if (self.hoverGrip && !self.pending) {
-        self.hotGrip = self.hoverGrip;
-        self.gripDrag = { ent: self.hoverGrip.e, key: self.hoverGrip.k, orig: E.deep(self.hoverGrip.e) };
-        self.setPrompt('** ESTIRAR **  Precise punto de estiramiento: ');
-        self.refresh();
+        self.enterGripEdit(self.hoverGrip);
         return;
       }
 
       var ent = self.pickAt(sp);
+      /* ciclo de selección cuando hay varios objetos superpuestos */
+      if (!self.pending && !e.shiftKey && self.doc.vars.SELECTIONCYCLING) {
+        var all = self.pickAllAt(sp);
+        if (all.length > 1) {
+          self.ui.cycleMenu(all, sp, function (chosen) {
+            self.addToSelection([chosen]);
+            self.hoverEnt = null;
+            self.refresh();
+          });
+          return;
+        }
+      }
       if (self.pending && (self.pending.kind === 'point' || self.pending.kind === 'dist' || self.pending.kind === 'angle' || self.pending.kind === 'real')) {
         self.feedPick(sp, self.cursorWorld, ent);
         return;
@@ -225,7 +232,7 @@
         return;
       }
       /* ventana de designación */
-      drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey };
+      drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey, path: [sp], plen: 0 };
     });
 
     cv.addEventListener('pointermove', function (e) {
@@ -246,9 +253,20 @@
       }
       self.updateCursor(sp, e);
       if (drag && drag.mode === 'box') {
+        var last = drag.path[drag.path.length - 1];
+        var step = Math.hypot(sp.x - last.x, sp.y - last.y);
+        if (step > 3) { drag.plen += step; drag.path.push({ x: sp.x, y: sp.y }); }
+        var chord = Math.hypot(sp.x - drag.startScreen.x, sp.y - drag.startScreen.y);
+        drag.lasso = drag.plen > Math.max(60, chord * 1.7);
         var crossing = self.cursorWorld.x < drag.start.x;
         if (self.pending && self.pending.forceMode) crossing = self.pending.forceMode === 'crossing';
-        self.pickBox = { p1: drag.start, p2: self.cursorWorld, crossing: crossing };
+        if (drag.lasso) {
+          self.pickBox = null;
+          self.lassoPath = { pts: drag.path.map(function (q) { return self.r.s2w(q); }), crossing: crossing };
+        } else {
+          self.lassoPath = null;
+          self.pickBox = { p1: drag.start, p2: self.cursorWorld, crossing: crossing };
+        }
       }
       self.refresh();
     });
@@ -258,6 +276,18 @@
       if (drag && drag.mode === 'box') {
         var sp = local(e);
         var moved = Math.abs(sp.x - drag.startScreen.x) > 3 || Math.abs(sp.y - drag.startScreen.y) > 3;
+        if (moved && drag.lasso) {
+          var cl = self.cursorWorld.x < drag.start.x;
+          if (self.pending && self.pending.forceMode) { cl = self.pending.forceMode === 'crossing'; self.pending.forceMode = null; }
+          var poly = drag.path.map(function (q) { return self.r.s2w(q); });
+          var hitL = self.selectLasso(poly, cl);
+          if (drag.shift) self.removeFromSelection(hitL); else self.addToSelection(hitL);
+          self.lassoPath = null;
+          self.pickBox = null;
+          drag = null;
+          self.refresh();
+          return;
+        }
         if (moved) {
           var crossing = self.cursorWorld.x < drag.start.x;
           if (self.pending && self.pending.forceMode) { crossing = self.pending.forceMode === 'crossing'; self.pending.forceMode = null; }
@@ -303,6 +333,7 @@
     cv.addEventListener('contextmenu', function (e) {
       e.preventDefault();
       if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
+      if (e.shiftKey) { self.ui.osnapMenu(e.clientX, e.clientY); return; }
       self.ui.contextMenu(e.clientX, e.clientY);
     });
 
@@ -324,14 +355,52 @@
       }
       var ent = self.pickAt(sp);
       if (!ent) return;
-      if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'DIMENSION') {
-        self.selSet = [ent];
-        self.startCommand('EDITTEXTO');
-      } else {
-        self.selSet = [ent];
-        self.ui.togglePalette('props', true);
-      }
+      self.selSet = [ent];
+      if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'DIMENSION') self.startCommand('EDITTEXTO');
+      else if (ent.type === 'HATCH' && !ent.wipeout) self.startCommand('EDITSOMB');
+      else if (ent.type === 'LWPOLYLINE') self.startCommand('EDITPOL');
+      else if (ent.type === 'INSERT' && ent.attribs && ent.attribs.length) self.startCommand('EDITATR');
+      else self.ui.togglePalette('props', true);
       self.refresh();
+    });
+  };
+
+  App.prototype.pushLayerState = function () {
+    var st = {}, doc = this.doc;
+    doc.layerOrder.forEach(function (n) {
+      var l = doc.layers[n];
+      st[n] = { on: l.on, frozen: l.frozen, locked: l.locked, color: l.color, ltype: l.ltype, lw: l.lw, plot: l.plot };
+    });
+    this.layerStates = this.layerStates || [];
+    this.layerStates.push(st);
+    if (this.layerStates.length > 20) this.layerStates.shift();
+  };
+
+  App.prototype.selectLasso = function (poly, crossing) {
+    var doc = this.doc;
+    if (poly.length < 3) return [];
+    var box = G.bboxFromPts(poly);
+    return doc.selectable().filter(function (e) {
+      var b = E.extents(e, doc);
+      if (G.bboxValid(b) && !G.bboxHit(box, b)) return false;
+      var segs = E.segs(e, doc, 1);
+      var allIn = true, anyIn = false;
+      for (var i = 0; i < segs.length; i++) {
+        var pts = segs[i].pts, n = pts.length;
+        for (var j = 0; j < n; j++) {
+          if (G.ptInPoly(pts[j], poly)) anyIn = true; else allIn = false;
+          if (crossing && anyIn) return true;
+        }
+        if (crossing) {
+          var lim = segs[i].closed ? n : n - 1;
+          for (var k = 0; k < lim; k++) {
+            for (var m2 = 0; m2 < poly.length; m2++) {
+              if (G.segCross(pts[k], pts[(k + 1) % n], poly[m2], poly[(m2 + 1) % poly.length])) return true;
+            }
+          }
+        }
+      }
+      return crossing ? anyIn : allIn;
     });
   };
 
@@ -353,7 +422,8 @@
     this.cursorWorld = res.p;
     this.snapHit = res.snap;
     this.trackLines = res.tracks && res.tracks.length ? res.tracks : null;
-    this.ui.showSnapTip(res.snap);
+    this.trackLabel = res.label || null;
+    this.ui.showSnapTip(res.snap, res.label);
     this.ui.setCoords((this.paperMode && !this.activeVp) ? res.p : CAD.UCS.w2u(this.doc, res.p));
     if (this.doc.vars.DYNMODE) this.ui.updateDyn();
 
@@ -395,12 +465,178 @@
       this.rubber = null;
     }
 
-    /* arrastre de pinzamiento */
-    if (this.gripDrag) {
-      var tmp = E.deep(this.gripDrag.orig);
-      E.moveGrip(tmp, this.gripDrag.key, this.cursorWorld, this.doc);
-      this.preview = [tmp];
+    /* información al pasar el cursor sobre un objeto */
+    this.scheduleRollover();
+  };
+
+  /* ============================================================
+     Edición mediante pinzamientos
+     ============================================================ */
+  var GRIP_MODES = [
+    { k: 'ESTIRAR', p: 'Precise punto de estiramiento' },
+    { k: 'DESPLAZAR', p: 'Precise punto de desplazamiento' },
+    { k: 'GIRAR', p: 'Precise ángulo de rotación' },
+    { k: 'ESCALA', p: 'Precise factor de escala' },
+    { k: 'SIMETRÍA', p: 'Precise segundo punto' }
+  ];
+  CAD.GRIP_MODES = GRIP_MODES;
+
+  App.prototype.enterGripEdit = function (g) {
+    if (this.selSet.indexOf(g.e) < 0) this.selSet.push(g.e);
+    this.hotGrip = g;
+    this.gripMode = 0;
+    this.gripCopy = false;
+    this.gripDrag = {
+      ent: g.e, key: g.k,
+      base: { x: g.p.x, y: g.p.y },
+      orig: E.deep(g.e),
+      origSel: this.selSet.map(function (e) { return E.deep(e); }),
+      a0: 0, d0: 1
+    };
+    this.gripPrompt();
+  };
+
+  App.prototype.gripPrompt = function () {
+    var self = this, gd = this.gripDrag;
+    if (!gd) return;
+    var cur = this.cursorWorld || { x: gd.base.x + 1, y: gd.base.y };
+    gd.a0 = G.ang(gd.base, cur);
+    gd.d0 = Math.max(1e-6, G.dist(gd.base, cur));
+    var m = GRIP_MODES[this.gripMode];
+    var kws = ['Punto base', 'Copiar', 'desHacer', 'Salir'];
+    this.pending = {
+      kind: 'point',
+      msg: m.p,
+      opts: {
+        base: gd.base, rubber: this.gripMode === 0 ? null : 'line', keywords: kws,
+        preview: function (c) { return self.gripPreview(c); }
+      },
+      resolve: function (v) { self.gripResolve(v); },
+      reject: function () { self.cancelGrip(); },
+      text: '** ' + m.k + (this.gripCopy ? ' (múltiple)' : '') + ' **  ' + m.p +
+        ' [' + kws.join('/') + ']: '
+    };
+    this.setPrompt(this.pending.text);
+    this.refresh();
+  };
+
+  App.prototype.gripMatrix = function (c) {
+    var gd = this.gripDrag, b = gd.base;
+    switch (this.gripMode) {
+      case 1: return G.mTrans(c.x - b.x, c.y - b.y);
+      case 2: return G.mRot(G.ang(b, c) - gd.a0, b);
+      case 3: {
+        var f = G.dist(b, c) / gd.d0;
+        if (!isFinite(f) || Math.abs(f) < 1e-9) f = 1e-9;
+        return G.mScale(f, f, b);
+      }
+      case 4: return G.dist(b, c) < 1e-9 ? G.mIdent() : G.mMirror(b, c);
+      default: return null;
     }
+  };
+
+  App.prototype.gripPreview = function (c) {
+    var gd = this.gripDrag;
+    if (!gd) return [];
+    if (this.gripMode === 0) {
+      var tmp = E.deep(gd.orig);
+      E.moveGrip(tmp, gd.key, c, this.doc);
+      return [tmp];
+    }
+    var m = this.gripMatrix(c), self = this;
+    return gd.origSel.map(function (e) {
+      var n = E.deep(e);
+      E.transform(n, m, self.doc);
+      return n;
+    });
+  };
+
+  App.prototype.gripResolve = function (v) {
+    var self = this, gd = this.gripDrag;
+    if (!gd) return;
+    if (v === null) {                      /* Intro: siguiente modo */
+      this.gripMode = (this.gripMode + 1) % GRIP_MODES.length;
+      this.gripPrompt();
+      return;
+    }
+    if (v && v.kw) {
+      if (v.kw === 'S') { this.cancelGrip(); return; }
+      if (v.kw === 'C') { this.gripCopy = !this.gripCopy; this.gripPrompt(); return; }
+      if (v.kw === 'PB' || v.kw === 'P') {
+        this.pending = null;
+        this.setPrompt('Precise punto base: ');
+        this.pendingBase = true;
+        var ctxLike = this;
+        this.pending = {
+          kind: 'point', msg: 'Precise punto base', opts: {},
+          resolve: function (p2) {
+            if (p2 && p2.x !== undefined) gd.base = { x: p2.x, y: p2.y };
+            self.gripPrompt();
+          },
+          reject: function () { self.cancelGrip(); },
+          text: 'Precise punto base: '
+        };
+        this.setPrompt(this.pending.text);
+        return;
+      }
+      if (v.kw === 'H') { this.cancelGrip(); this.startCommand('H'); return; }
+      this.gripPrompt();
+      return;
+    }
+    /* punto: se aplica */
+    this.doc.mark(GRIP_MODES[this.gripMode].k);
+    if (this.gripMode === 0) {
+      E.moveGrip(gd.ent, gd.key, v, this.doc);
+    } else {
+      var m = this.gripMatrix(v);
+      if (this.gripCopy) {
+        this.gripPreview(v).forEach(function (e) { e.id = 0; self.doc.add(e); });
+      } else {
+        this.selSet.forEach(function (e) { E.transform(e, m, self.doc); });
+      }
+    }
+    if (this.gripCopy) {
+      gd.origSel = this.selSet.map(function (e) { return E.deep(e); });
+      this.gripPrompt();
+      return;
+    }
+    this.cancelGrip(true);
+  };
+
+  App.prototype.cancelGrip = function (keepSel) {
+    this.gripDrag = null;
+    this.hotGrip = null;
+    this.gripMode = 0;
+    this.gripCopy = false;
+    this.pending = null;
+    this.preview = [];
+    this.rubber = null;
+    if (!keepSel) this.selSet = this.selSet.slice();
+    this.setPrompt('Comando: ');
+    this.refresh();
+  };
+
+  /* ============================================================
+     Información al pasar el cursor
+     ============================================================ */
+  App.prototype.scheduleRollover = function () {
+    var self = this;
+    clearTimeout(this._rollT);
+    this.ui.hideRollover();
+    if (this.pending || this.gripDrag || !this.hoverEnt) return;
+    var ent = this.hoverEnt;
+    this._rollT = setTimeout(function () {
+      if (self.hoverEnt === ent && !self.pending && !self.gripDrag) {
+        self.ui.showRollover(ent, self.cursorScreen);
+      }
+    }, 520);
+  };
+
+  /* Punto medio entre dos puntos (menú Mayús + botón derecho) */
+  App.prototype.startMidBetween = function () {
+    this.mtpCollect = [];
+    this.out('Punto medio entre 2 puntos');
+    this.setPrompt('Primer punto del medio: ');
   };
 
   App.prototype.applyGrip = function (p) {
@@ -409,6 +645,8 @@
     this.doc.mark('ESTIRAR');
     E.moveGrip(gd.ent, gd.key, p, this.doc);
     this.gripDrag = null;
+    this.gripMode = 0;
+    this.gripCopy = false;
     this.hotGrip = null;
     this.preview = [];
     this.setPrompt('Comando: ');
@@ -438,7 +676,7 @@
       if (e.key === 'Escape') {
         e.preventDefault();
         if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
-        if (self.gripDrag) { self.gripDrag = null; self.hotGrip = null; self.preview = []; self.setPrompt('Comando: '); self.refresh(); return; }
+        if (self.gripDrag) { self.cancelGrip(); return; }
         self.ui.closeMenus();
         self.cancel();
         document.getElementById('cmdinput').value = '';

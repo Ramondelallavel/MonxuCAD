@@ -3,7 +3,7 @@
 Estación de dibujo y diseño 2D que se ejecuta en el navegador, construida para
 parecerse a AutoCAD en interfaz, comandos y formatos de archivo.
 
-![estado](https://img.shields.io/badge/comandos-146-blue) ![formatos](https://img.shields.io/badge/DXF-R12%20%7C%202000-green) ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
+![estado](https://img.shields.io/badge/comandos-169-blue) ![formatos](https://img.shields.io/badge/DXF-R12%20%7C%202000-green) ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
 
 ## Qué incluye
 
@@ -14,10 +14,11 @@ comandos con histórico y autocompletado, y barra de estado con los conmutadores
 REJILLA · FORZCURSOR · ORTO · POLAR · REFENT · RASTREO · DIN · GROSOR.
 Tema oscuro y tema claro.
 
-**146 comandos** con nombre en español e inglés y sus alias (`L`, `C`, `REC`,
+**169 comandos** con nombre en español e inglés y sus alias (`L`, `C`, `REC`,
 `TR`, `F`, `O`, `X`…). Motor de peticiones idéntico al original:
 `Precise punto siguiente o [Cerrar/desHacer]:`, entrada `x,y`, `@dx,dy`,
-`@dist<ángulo` y distancia directa, Esc cancela, Intro repite.
+`@dist<ángulo` y distancia directa, Esc cancela, Intro repite, y las opciones
+entre corchetes se pulsan con el ratón.
 
 - **Dibujo** — LINEA, POL, CIRCULO, ARCO, RECTANG, POLIGONO, ELIPSE, SPLINE,
   ARANDELA, PUNTO, LINEAM, LINEAX, RAYO, NUBEREV, SOMBREA, DEGRADADO, CONTORNO,
@@ -32,6 +33,24 @@ Tema oscuro y tema claro.
   y girable, vistas guardadas, plantillas de dibujo.
 - **Espacio papel** — presentaciones con ventanas gráficas a escala real,
   bloqueo de ventana, cajetín con atributos y configuración de página.
+- **Regiones** — REGION, UNION, DIFERENCIA e INTERSEC con recorte booleano
+  exacto sobre contornos cerrados.
+- **Utilidades** — CUBRIR, TABLA, DEPURAR (duplicados), DESIGNASEMEJANTE,
+  AISLAROBJETOS, CALCRAPIDA, CAMBIA, ESCALATEXTO, JUSTIFICATEXTO, MULTIPLE.
+
+**Cómo se comporta al dibujar**
+
+- **Rastreo de referencia a objetos** — se adquiere un punto notable dejando el
+  cursor sobre él; salen trayectorias de alineación en los ángulos polares y
+  sus cruces también capturan, con rótulo de distancia y ángulo.
+- **Pinzamientos multifunción** — al activar un pinzamiento, Intro recorre
+  ESTIRAR ▸ DESPLAZAR ▸ GIRAR ▸ ESCALA ▸ SIMETRÍA, con opción de copia múltiple.
+- **Cotas asociativas** — las cotas tomadas sobre puntos notables siguen a la
+  geometría: al alargar o mover el objeto, la medida se recalcula sola.
+- **Selección** — ventana, captura, lazo a mano alzada, ciclo entre objetos
+  superpuestos e información al pasar el cursor.
+- **Mayús + botón derecho** abre el menú de sustitución de referencia, con
+  punto medio entre dos puntos incluido.
 
 **Recursos**
 

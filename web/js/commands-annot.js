@@ -7,6 +7,27 @@
   var isKw = CAD.CU.isKw;
   function pt(v) { return v && v.x !== undefined ? v : null; }
 
+  /* Vincula los puntos de definición a los puntos notables del objeto */
+  function assocOf(ctx, src, pts) {
+    if (!src || !src.id) return null;
+    var all = E.snapPoints(src, ctx.doc);
+    var out = {}, keys = ['p1', 'p2'], any = false;
+    pts.forEach(function (p, k) {
+      var key = keys[k];
+      if (!key) return;
+      var best = null, bi = -1, bd = 1e-6;
+      ['end', 'cen', 'qua', 'mid'].forEach(function (tp) {
+        var f = all.filter(function (s) { return s.type === tp; });
+        f.forEach(function (s, i) {
+          var d = G.dist(s.p, p);
+          if (d < bd) { bd = d; best = tp; bi = i; }
+        });
+      });
+      if (best) { out[key] = { id: src.id, type: best, i: bi }; any = true; }
+    });
+    return any ? out : null;
+  }
+
   function newDim(ctx, kind, o) {
     var d = E.dim(kind, o);
     d.style = ctx.doc.vars.DIMSTYLE;
@@ -31,19 +52,24 @@
      ============================================================ */
   Cmd.add(['ACOTALINEAL', 'DIMLINEAR', 'DIMLIN', 'DLI'], { group: 'dim', icon: 'dimlinear', title: 'Cota lineal' }, async function (ctx) {
     var p1 = await ctx.getPoint('Precise el origen de la primera línea de referencia o <designar objeto>', { allowNone: true });
-    var a, b;
+    var a, b, assoc = null;
     if (!pt(p1)) {
       var e = await ctx.getEntity('Designe objeto para acotar');
       if (!e) return;
       var ep = endpointsOf(ctx, e.ent);
       if (!ep) { ctx.err('Objeto no válido para acotar.'); return; }
       a = ep[0]; b = ep[1];
+      assoc = assocOf(ctx, e.ent, [a, b]);
     } else {
       a = p1;
+      var r1 = ctx.app.assocRef(a);
       b = await ctx.getPoint('Precise el origen de la segunda línea de referencia', { base: a });
       if (!pt(b)) return;
+      var r2 = ctx.app.assocRef(b);
+      if (r1 || r2) assoc = { p1: r1, p2: r2 };
     }
     var dim = newDim(ctx, 'linear', { p1: a, p2: b, p3: G.mid(a, b), rot: 0 });
+    if (assoc) dim.assoc = assoc;
     var p3 = await ctx.getPoint('Precise ubicación de línea de cota o', {
       keywords: ['textoM', 'Texto', 'ánGulo', 'Horizontal', 'Vertical', 'Rotado'],
       preview: function (c) {
@@ -94,18 +120,23 @@
      ============================================================ */
   Cmd.add(['ACOTAALINEADA', 'DIMALIGNED', 'DIMALI', 'DAL'], { group: 'dim', icon: 'dimaligned', title: 'Cota alineada' }, async function (ctx) {
     var p1 = await ctx.getPoint('Precise el origen de la primera línea de referencia o <designar objeto>', { allowNone: true });
-    var a, b;
+    var a, b, assoc = null;
     if (!pt(p1)) {
       var e = await ctx.getEntity('Designe objeto para acotar'); if (!e) return;
       var ep = endpointsOf(ctx, e.ent);
       if (!ep) { ctx.err('Objeto no válido.'); return; }
       a = ep[0]; b = ep[1];
+      assoc = assocOf(ctx, e.ent, [a, b]);
     } else {
       a = p1;
+      var ra = ctx.app.assocRef(a);
       b = await ctx.getPoint('Precise el origen de la segunda línea de referencia', { base: a });
       if (!pt(b)) return;
+      var rb = ctx.app.assocRef(b);
+      if (ra || rb) assoc = { p1: ra, p2: rb };
     }
     var dim = newDim(ctx, 'aligned', { p1: a, p2: b, p3: G.mid(a, b) });
+    if (assoc) dim.assoc = assoc;
     var p3 = await ctx.getPoint('Precise ubicación de línea de cota o', {
       keywords: ['textoM', 'Texto', 'ánGulo'],
       preview: function (c) { var d = E.deep(dim); d.p3 = c; return [d]; }
@@ -170,6 +201,8 @@
       var ent = e.ent;
       var onCircle = G.polar(ent.c, G.ang(ent.c, e.p), ent.r);
       var dim = newDim(ctx, kind, { center: ent.c, p1: onCircle });
+      var rq = assocOf(ctx, ent, [onCircle]);
+      if (rq) dim.assoc = rq;
       CAD.Dim.build(dim, ctx.doc);
       ctx.out('Dimensión = ' + G.fmt(dim.measurement, 2));
       var p = await ctx.getPoint('Precise ubicación de la línea de cota o', {

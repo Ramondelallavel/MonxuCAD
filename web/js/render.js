@@ -197,6 +197,8 @@
 
     this.drawUCS();
     if (app.pickBox) this.drawPickWindow(app.pickBox);
+    if (app.lassoPath) this.drawLasso(app.lassoPath);
+    if (CAD.Track) CAD.Track.draw(this, ctx);
     if (app.trackLines) this.drawTracking(app.trackLines);
     if (app.snapHit) this.drawSnapMarker(app.snapHit);
     if (app.showCross) this.drawCrosshair();
@@ -647,6 +649,19 @@
       for (var i = 1; i < loop.length; i++) { p = self.w2s(loop[i]); ctx.lineTo(p.x, p.y); }
       ctx.closePath();
     });
+    if (ent.wipeout) {
+      ctx.fillStyle = this.app.paperMode ? '#ffffff' : (this.app.lightTheme ? '#ffffff' : THEME.bg);
+      ctx.fill('evenodd');
+      if (this.app.wipeoutFrames !== false) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = o && o.hl ? THEME.highlight : col;
+        ctx.lineWidth = o && o.hl ? 1.6 : 1;
+        var self2 = this;
+        ent.loops.forEach(function (loop) { self2.pathPts(ctx, loop, true); ctx.stroke(); });
+      }
+      ctx.restore();
+      return;
+    }
     var alpha = 1 - (ent.transparency || 0) / 100;
     ctx.globalAlpha = o && o.hl ? 0.55 : alpha;
     if (ent.solid || CAD.HatchLib.isSolid(ent.pattern)) {
@@ -740,6 +755,27 @@
     ctx.restore();
   };
 
+  Renderer.prototype.drawLasso = function (l) {
+    var ctx = this.ctx, self = this;
+    if (!l.pts || l.pts.length < 2) return;
+    ctx.save();
+    ctx.beginPath();
+    l.pts.forEach(function (p, i) {
+      var s = self.w2s(p);
+      if (i) ctx.lineTo(s.x, s.y); else ctx.moveTo(s.x, s.y);
+    });
+    ctx.closePath();
+    if (l.crossing) {
+      ctx.fillStyle = THEME.selCross; ctx.strokeStyle = THEME.selCrossEdge; ctx.setLineDash([6, 4]);
+    } else {
+      ctx.fillStyle = THEME.selWindow; ctx.strokeStyle = THEME.selWindowEdge; ctx.setLineDash([]);
+    }
+    ctx.lineWidth = 1.2;
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  };
+
   Renderer.prototype.drawRubber = function (r) {
     var ctx = this.ctx;
     ctx.save();
@@ -771,9 +807,9 @@
   Renderer.prototype.drawTracking = function (lines) {
     var ctx = this.ctx, self = this;
     ctx.save();
-    ctx.setLineDash([5, 5]);
     ctx.lineWidth = 1;
     lines.forEach(function (l) {
+      ctx.setLineDash(l.dash || [5, 5]);
       ctx.strokeStyle = l.color || THEME.polar;
       ctx.beginPath();
       var a = self.w2s(l.p1), b = self.w2s(l.p2);

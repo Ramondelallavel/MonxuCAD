@@ -121,7 +121,11 @@
     audit: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13l2 2 4-4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     order: '<path d="M3 6h12M3 12h8M3 18h12"/><path d="M19 4v16M16 17l3 3 3-3"/>',
-    gradient: '<rect x="4" y="5" width="16" height="14"/><path d="M4 9h16M4 12h16M4 15h16" opacity=".5"/>'
+    gradient: '<rect x="4" y="5" width="16" height="14"/><path d="M4 9h16M4 12h16M4 15h16" opacity=".5"/>',
+    cycle: '<rect x="3" y="5" width="11" height="9"/><rect x="8" y="10" width="11" height="9"/><path d="M17 3l3 3-3 3" opacity=".7"/>',
+    wipeout: '<rect x="3" y="6" width="18" height="12" stroke-dasharray="3 2"/><path d="M6 15l5-6 4 4 3-3" opacity=".45"/><rect x="7" y="9" width="10" height="6" fill="currentColor" stroke="none" opacity=".9"/>',
+    boolean: '<circle cx="9.5" cy="12" r="6"/><circle cx="14.5" cy="12" r="6"/>',
+    table: '<rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M3 14.5h18M9 9v11M15 9v11"/>'
   };
   function icon(name, cls) {
     var p = P[name] || P.point;
@@ -145,6 +149,7 @@
             [{ cmd: 'RECTANG' }, { cmd: 'POLIGONO' }, { cmd: 'ELIPSE', menu: ['ELIPSE|Ejes, fin', 'ELIPSE C|Centro', 'ELIPSE A|Arco elíptico'] }],
             [{ cmd: 'SPLINE' }, { cmd: 'ARANDELA' }, { cmd: 'PUNTO' }],
             [{ cmd: 'LINEAM', title: 'Multilínea' }, { cmd: 'CONTORNO' }, { cmd: 'DEGRADADO', icon: 'gradient' }],
+            [{ cmd: 'CUBRIR' }, { cmd: 'REGION' }, { cmd: 'TABLA' }],
             [{ cmd: 'SOMBREA', big: true }],
             [{ cmd: 'NUBEREV', title: 'Nube' }, { cmd: 'LINEAX', title: 'Línea aux' }, { cmd: 'RAYO' }]
           ]
@@ -159,7 +164,9 @@
             [{ cmd: 'EMPALME' }, { cmd: 'CHAFLAN' }, { cmd: 'MATRIZ' }],
             [{ cmd: 'BORRA' }, { cmd: 'DESCOMP' }, { cmd: 'UNIR' }],
             [{ cmd: 'PARTE' }, { cmd: 'ALINEA' }, { cmd: 'EDITPOL', title: 'Editpol' }],
-            [{ cmd: 'LONGITUD', title: 'Longitud' }, { cmd: 'ORDENAOBJETOS', icon: 'order', title: 'Orden' }, { cmd: 'EDITSOMB', title: 'Edit. somb.' }]
+            [{ cmd: 'LONGITUD', title: 'Longitud' }, { cmd: 'ORDENAOBJETOS', icon: 'order', title: 'Orden' }, { cmd: 'EDITSOMB', title: 'Edit. somb.' }],
+            [{ cmd: 'UNION', icon: 'boolean' }, { cmd: 'DIFERENCIA', icon: 'boolean' }, { cmd: 'INTERSEC', icon: 'boolean', title: 'Intersecar' }],
+            [{ cmd: 'DEPURAR' }, { cmd: 'CAMBIA', title: 'Cambiar' }, { cmd: 'DEFINIRPORCAPA', icon: 'layer', title: 'Por capa' }]
           ]
         },
         {
@@ -195,7 +202,8 @@
           label: 'Utilidades', groups: [
             [{ cmd: 'DISTANCIA' }, { cmd: 'AREA' }, { cmd: 'LISTA' }],
             [{ cmd: 'ID', title: 'Coordenada' }, { cmd: 'DESIGNARAPIDO', title: 'Desig. rápida' }, { cmd: 'MEDIRGEOM', title: 'Medir' }],
-            [{ cmd: 'GRUPO' }, { cmd: 'DESAGRUPA', icon: 'group', title: 'Desagrupar' }, { cmd: 'LIMPIA' }]
+            [{ cmd: 'GRUPO' }, { cmd: 'DESAGRUPA', icon: 'group', title: 'Desagrupar' }, { cmd: 'LIMPIA' }],
+            [{ cmd: 'DESIGNASEMEJANTE', title: 'Semejantes' }, { cmd: 'AISLAROBJETOS', title: 'Aislar' }, { cmd: 'CALCRAPIDA', title: 'Calculadora' }]
           ]
         },
         {
@@ -217,7 +225,8 @@
     },
     {
       id: 'anotar', label: 'Anotar', panels: [
-        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }]] },
+        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }, { cmd: 'ESCALATEXTO', icon: 'scale', title: 'Escalar' }, { cmd: 'JUSTIFICATEXTO', icon: 'align', title: 'Justificar' }]] },
+        { label: 'Tablas', groups: [[{ cmd: 'TABLA', big: true }]] },
         {
           label: 'Cotas', groups: [
             [{ cmd: 'ACOTALINEAL', big: true, title: 'Lineal' }],
@@ -243,6 +252,7 @@
         },
         { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }]] },
         { label: 'Coordenadas', groups: [[{ cmd: 'SCP', big: true }], [{ cmd: 'SCPGLOBAL', icon: 'ucs', title: 'SCP global' }, { cmd: 'VISTA', title: 'Vistas' }]] },
+        { label: 'Visibilidad', groups: [[{ cmd: 'AISLAROBJETOS', big: true, title: 'Aislar' }], [{ cmd: 'OCULTAROBJETOS', big: true, icon: 'view', title: 'Ocultar' }], [{ cmd: 'FINAISLAR', icon: 'view', title: 'Mostrar todo' }]] },
         { label: 'Interfaz', groups: [[{ cmd: 'LIMPIAPANTALLA', title: 'Pantalla limpia' }, { cmd: 'REGEN' }, { cmd: 'OPCIONES' }]] }
       ]
     },
@@ -268,7 +278,7 @@
     {
       id: 'administrar', label: 'Administrar', panels: [
         { label: 'Dibujo', groups: [[{ cmd: 'LIMPIA', big: true }], [{ cmd: 'UNIDADES', big: true }], [{ cmd: 'AUDITORIA', icon: 'audit', title: 'Auditoría' }, { cmd: 'RENOMBRA', icon: 'textedit', title: 'Renombrar' }, { cmd: 'PLANTILLA', title: 'Plantilla' }]] },
-        { label: 'Consulta', groups: [[{ cmd: 'ESTADO', icon: 'list', title: 'Estado' }, { cmd: 'TIEMPO', icon: 'clock', title: 'Tiempo' }, { cmd: 'CARGAPAT', icon: 'hatch', title: 'Cargar .pat' }]] },
+        { label: 'Consulta', groups: [[{ cmd: 'ESTADO', icon: 'list', title: 'Estado' }, { cmd: 'TIEMPO', icon: 'clock', title: 'Tiempo' }, { cmd: 'CARGAPAT', icon: 'hatch', title: 'Cargar .pat' }], [{ cmd: 'CALCRAPIDA', title: 'Calculadora' }, { cmd: 'DEPURAR', title: 'Depurar' }, { cmd: 'PUNTOBASE', icon: 'point', title: 'Punto base' }]] },
         { label: 'Parámetros', groups: [[{ cmd: 'OPCIONES', big: true }], [{ cmd: 'PARAMDIB', title: 'Param. dibujo' }, { cmd: 'REFENT', title: 'Referencias' }, { cmd: 'MODIVAR', title: 'Variables' }]] }
       ]
     },
@@ -292,6 +302,7 @@
     { key: 'OTRACK', icon: 'otrack', label: 'Rastreo de referencia a objetos', kbd: 'F11' },
     { key: 'DYNMODE', icon: 'dyn', label: 'Entrada dinámica', kbd: 'F12' },
     { key: 'LWDISPLAY', icon: 'lwt', label: 'Mostrar grosor de línea' },
+    { key: 'SELECTIONCYCLING', icon: 'cycle', label: 'Ciclo de selección' },
     { key: 'CLEAN', icon: 'clean', label: 'Pantalla limpia', kbd: 'Ctrl+0' }
   ];
 
@@ -333,6 +344,12 @@
     $('appMenuBtn').addEventListener('click', function (e) { self.appMenu(e.currentTarget); });
     $('btnHelp').addEventListener('click', function () { self.helpDialog(); });
     $('viewcube').addEventListener('click', function () { app.startCommand('ZOOM', ['E']); });
+    $('scaleLabel').addEventListener('click', function (e) { self.scaleMenu(e.currentTarget); });
+    $('scaleLabel').style.cursor = 'pointer';
+    $('cmdwin').addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      self.recentMenu(e.clientX, e.clientY);
+    });
     this.el.search.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { app.exec(self.el.search.value); self.el.search.value = ''; self.el.input.focus(); }
     });
@@ -450,6 +467,8 @@
     });
     var ec = this.el.entCount;
     if (ec) ec.textContent = this.app.doc.entities.length + ' objetos';
+    var sl = this.el.scaleLabel;
+    if (sl) sl.textContent = this.app.doc.vars.CANNOSCALE || '1:1';
   };
 
   function ltPreview(doc, name) {
@@ -485,7 +504,15 @@
     var app = this.app, v = app.doc.vars;
     if (key === 'OSNAP') { app.osnapOn = !app.osnapOn; app.out('<Refent ' + (app.osnapOn ? 'activado' : 'desactivado') + '>'); }
     else if (key === 'CLEAN') { this.toggleCleanScreen(); }
-    else if (key === 'OTRACK') { v.OTRACK = v.OTRACK ? 0 : 1; }
+    else if (key === 'OTRACK') {
+      v.OTRACK = v.OTRACK ? 0 : 1;
+      if (!v.OTRACK && CAD.Track) CAD.Track.clear();
+      app.out('<Rastreo de referencia ' + (v.OTRACK ? 'activado' : 'desactivado') + '>');
+    }
+    else if (key === 'SELECTIONCYCLING') {
+      v.SELECTIONCYCLING = v.SELECTIONCYCLING ? 0 : 2;
+      app.out('<Ciclo de selección ' + (v.SELECTIONCYCLING ? 'activado' : 'desactivado') + '>');
+    }
     else {
       v[key] = v[key] ? 0 : 1;
       var names = { GRIDMODE: 'Rejilla', SNAPMODE: 'Forzcursor', ORTHOMODE: 'Orto', POLARMODE: 'Polar', DYNMODE: 'Dinámico', LWDISPLAY: 'Grosor' };
@@ -500,7 +527,8 @@
     var st = {
       GRIDMODE: v.GRIDMODE, SNAPMODE: v.SNAPMODE, ORTHOMODE: v.ORTHOMODE,
       POLARMODE: v.POLARMODE, OSNAP: app.osnapOn ? 1 : 0, OTRACK: v.OTRACK,
-      DYNMODE: v.DYNMODE, LWDISPLAY: v.LWDISPLAY, CLEAN: app.cleanScreen ? 1 : 0
+      DYNMODE: v.DYNMODE, LWDISPLAY: v.LWDISPLAY, SELECTIONCYCLING: v.SELECTIONCYCLING,
+      CLEAN: app.cleanScreen ? 1 : 0
     };
     Array.prototype.forEach.call(this.el.toggles.children, function (b) {
       b.classList.toggle('on', !!st[b.dataset.tog]);
@@ -563,8 +591,27 @@
     this.el.hist.scrollTop = this.el.hist.scrollHeight;
   };
 
+  function escHtml(t) {
+    return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   UI.prototype.setPrompt = function (s) {
-    this.el.prompt.textContent = s;
+    var el = this.el.prompt;
+    this.promptRaw = s;
+    var m = /^([\s\S]*?)(?:\[([^\]]*)\])?(?:\s*<([^>]*)>)?(:\s*)$/.exec(s);
+    if (!m || (!m[2] && !m[3])) {
+      el.textContent = s;
+    } else {
+      var html = escHtml(m[1]);
+      if (m[2]) {
+        html += '[' + m[2].split('/').map(function (k) {
+          return '<span class="kwlink" data-kw="' + escHtml(k) + '">' + escHtml(k) + '</span>';
+        }).join('/') + ']';
+      }
+      if (m[3]) html += ' &lt;<span class="kwlink" data-kw="\u0000def">' + escHtml(m[3]) + '</span>&gt;';
+      html += escHtml(m[4]);
+      el.innerHTML = html;
+    }
     if (this.app.doc.vars.DYNMODE) this.updateDyn();
   };
 
@@ -641,6 +688,15 @@
       self.hideAC();
       app.feedInput(s.alias);
     });
+    this.el.prompt.addEventListener('mousedown', function (e) {
+      var k = e.target.closest('[data-kw]');
+      if (!k) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (k.dataset.kw === '\u0000def') app.feedEnter();
+      else app.feedInput(k.dataset.kw);
+      inp.focus();
+    });
     document.getElementById('cmdrow').addEventListener('click', function () { inp.focus(); });
   };
 
@@ -686,11 +742,11 @@
     this.el.dynTip.hidden = !tipText;
   };
 
-  UI.prototype.showSnapTip = function (hit) {
+  UI.prototype.showSnapTip = function (hit, extra) {
     var t = this.el.snapTip;
-    if (!hit || !this.app.cursorScreen) { t.hidden = true; return; }
+    if ((!hit && !extra) || !this.app.cursorScreen) { t.hidden = true; return; }
     t.hidden = false;
-    t.textContent = hit.label;
+    t.textContent = hit ? (extra ? hit.label + '\n' + extra : hit.label) : extra;
     t.style.left = (this.app.cursorScreen.x + 16) + 'px';
     t.style.top = (this.app.cursorScreen.y - 24) + 'px';
   };
@@ -799,6 +855,151 @@
       { label: 'Ayuda y referencia de comandos', icon: 'help', kbd: 'F1', action: function () { self.helpDialog(); } },
       { label: 'Acerca de MonxuCAD', icon: 'dwg', action: function () { self.aboutDialog(); } }
     ]).classList.add('appmenu');
+  };
+
+  /* ---------- Escala de anotación ---------- */
+  var ANNO_SCALES = [
+    ['1:1', 1], ['1:2', 2], ['1:5', 5], ['1:10', 10], ['1:20', 20], ['1:25', 25],
+    ['1:50', 50], ['1:75', 75], ['1:100', 100], ['1:200', 200], ['1:500', 500],
+    ['2:1', 0.5], ['5:1', 0.2], ['10:1', 0.1]
+  ];
+  UI.prototype.scaleMenu = function (el) {
+    var self = this, app = this.app, doc = app.doc;
+    var r = el.getBoundingClientRect();
+    var items = [{ head: 'ESCALA DE ANOTACIÓN' }];
+    ANNO_SCALES.forEach(function (s2) {
+      items.push({
+        label: s2[0],
+        action: function () {
+          doc.mark('ESCALAANOTA');
+          doc.vars.CANNOSCALE = s2[0];
+          doc.vars.DIMSCALE = s2[1];
+          doc.vars.LTSCALE = Math.max(0.01, s2[1] / 2);
+          app.out('Escala de anotación: ' + s2[0] + '  (DIMSCALE=' + s2[1] + ', LTSCALE=' + G.fmt(doc.vars.LTSCALE, 2) + ')');
+          self.syncStatus();
+          app.refresh();
+        }
+      });
+    });
+    this.menuAt(r.left, r.top - 12, items);
+  };
+
+  /* ---------- Comandos recientes ---------- */
+  UI.prototype.recentMenu = function (x, y) {
+    var self = this, app = this.app;
+    var seen = [], items = [{ head: 'COMANDOS RECIENTES' }];
+    for (var i = this.cmdHistory.length - 1; i >= 0 && seen.length < 8; i--) {
+      var t = String(this.cmdHistory[i]).trim().toUpperCase();
+      var d = Cmd.find(t);
+      if (!d || seen.indexOf(d.name) >= 0) continue;
+      seen.push(d.name);
+      items.push((function (nm, def) {
+        return { label: nm + (def.title ? '  —  ' + def.title : ''), icon: def.icon, action: function () { app.startCommand(nm); } };
+      })(d.name, d));
+    }
+    if (seen.length === 0) items.push({ label: '(sin comandos recientes)' });
+    items.push('-');
+    items.push({ label: 'Copiar historial', icon: 'paste', action: function () {
+      var txt = Array.prototype.map.call(self.el.hist.children, function (d2) { return d2.textContent; }).join('\n');
+      try { navigator.clipboard.writeText(txt); self.flashResult('Historial copiado.'); } catch (e) { }
+    } });
+    items.push({ label: 'Borrar historial', action: function () { self.el.hist.innerHTML = ''; self.histLines = 0; } });
+    items.push('-');
+    items.push({ label: 'Opciones…', icon: 'settings', action: function () { app.startCommand('OPCIONES'); } });
+    this.menuAt(x, y, items);
+  };
+
+  /* ---------- Menú de sustitución de referencia a objetos ---------- */
+  UI.prototype.osnapMenu = function (x, y) {
+    var app = this.app;
+    var keys = ['end', 'mid', 'int', 'cen', 'geo', 'qua', 'nod', 'ins', 'per', 'tan', 'nea'];
+    var items = [{ head: 'SUSTITUIR REFERENCIA' }];
+    CAD.Snap.MODES.forEach(function (m) {
+      if (keys.indexOf(m.key) < 0) return;
+      items.push({
+        label: m.label,
+        action: function () {
+          app.osnapOverride = m.key;
+          app.out('_' + m.key, 'echo');
+          app.refresh();
+        }
+      });
+    });
+    items.push('-');
+    items.push({
+      label: 'Ninguno', action: function () { app.osnapOverride = 'none'; app.out('_non', 'echo'); app.refresh(); }
+    });
+    items.push({
+      label: 'Punto medio entre 2 puntos', action: function () { app.startMidBetween(); }
+    });
+    items.push('-');
+    items.push({ label: 'Parámetros de referencia…', icon: 'osnap', action: function () { app.startCommand('REFENT'); } });
+    this.menuAt(x, y, items);
+  };
+
+  /* ---------- Información al pasar el cursor ---------- */
+  UI.prototype.showRollover = function (ent, sp) {
+    var doc = this.app.doc;
+    var el = document.getElementById('rollover');
+    if (!ent || !sp) { el.hidden = true; return; }
+    var names = {
+      LINE: 'Línea', LWPOLYLINE: 'Polilínea', CIRCLE: 'Círculo', ARC: 'Arco', ELLIPSE: 'Elipse',
+      POINT: 'Punto', TEXT: 'Texto', MTEXT: 'Texto múltiple', INSERT: 'Referencia a bloque',
+      HATCH: 'Sombreado', SOLID: 'Sólido 2D', SPLINE: 'Spline', DIMENSION: 'Cota',
+      LEADER: 'Directriz', XLINE: 'Línea auxiliar', RAY: 'Rayo', ATTDEF: 'Atributo', ATTRIB: 'Atributo'
+    };
+    var c = E.effColor(ent, doc);
+    var rows = [
+      ['Capa', ent.layer],
+      ['Color', ent.color === 256 ? 'PorCapa' : ent.color === 0 ? 'PorBloque' : String(ent.color)],
+      ['Tipo de línea', ent.ltype === 'ByLayer' ? 'PorCapa' : ent.ltype]
+    ];
+    var pr = Math.min(3, doc.vars.LUPREC);
+    if (ent.type === 'LINE') rows.push(['Longitud', G.fmt(G.dist(ent.p1, ent.p2), pr)]);
+    else if (ent.type === 'CIRCLE') rows.push(['Radio', G.fmt(ent.r, pr)]);
+    else if (ent.type === 'ARC') rows.push(['Radio', G.fmt(ent.r, pr)], ['Arco', G.fmt(ent.r * G.sweep(ent.a0, ent.a1), pr)]);
+    else if (ent.type === 'LWPOLYLINE') rows.push(['Vértices', ent.verts.length]);
+    else if (ent.type === 'INSERT') rows.push(['Nombre', ent.name]);
+    else if (ent.type === 'DIMENSION') rows.push(['Medida', G.fmt(ent.measurement, pr)]);
+    else if (ent.type === 'HATCH') rows.push(['Patrón', ent.pattern]);
+    else if (ent.type === 'TEXT' || ent.type === 'MTEXT') rows.push(['Contenido', String(ent.text).slice(0, 28)]);
+    if (ent.group) rows.push(['Grupo', ent.group]);
+    el.innerHTML = '<b>' + escHtml(names[ent.type] || ent.type) + '</b>' +
+      '<table>' + rows.map(function (r) {
+        return '<tr><td class="k">' + escHtml(r[0]) + '</td><td>' + escHtml(r[1]) + '</td></tr>';
+      }).join('') + '</table>';
+    el.hidden = false;
+    var wrap = document.getElementById('canvasWrap').getBoundingClientRect();
+    var r2 = el.getBoundingClientRect();
+    el.style.left = Math.min(wrap.width - r2.width - 6, sp.x + 18) + 'px';
+    el.style.top = Math.min(wrap.height - r2.height - 6, sp.y + 18) + 'px';
+  };
+  UI.prototype.hideRollover = function () {
+    var el = document.getElementById('rollover');
+    if (el) el.hidden = true;
+  };
+
+  /* ---------- Ciclo de selección ---------- */
+  UI.prototype.cycleMenu = function (cands, screenPt, onPick) {
+    var self = this, app = this.app;
+    var names = { LINE: 'Línea', LWPOLYLINE: 'Polilínea', CIRCLE: 'Círculo', ARC: 'Arco', ELLIPSE: 'Elipse', TEXT: 'Texto', MTEXT: 'Texto múltiple', INSERT: 'Bloque', HATCH: 'Sombreado', DIMENSION: 'Cota', SPLINE: 'Spline', POINT: 'Punto', SOLID: 'Sólido', LEADER: 'Directriz' };
+    var items = [{ head: 'SELECCIÓN (' + cands.length + ' objetos)' }];
+    cands.forEach(function (e) {
+      items.push({
+        label: (names[e.type] || e.type) + '  ·  ' + e.layer,
+        action: function () { onPick(e); }
+      });
+    });
+    var rect = document.getElementById('canvasWrap').getBoundingClientRect();
+    var m = this.menuAt(rect.left + screenPt.x + 12, rect.top + screenPt.y + 12, items);
+    m.addEventListener('mouseover', function (e) {
+      var b = e.target.closest('[data-i]');
+      if (!b) return;
+      var idx = parseInt(b.dataset.i, 10) - 1;
+      app.hoverEnt = cands[idx] || null;
+      app.refresh();
+    });
+    return m;
   };
 
   /* ---------- Menú contextual del área gráfica ---------- */
@@ -2352,5 +2553,133 @@
     var app = this.app;
     CAD.Blocks.ensure(app.doc, name);
     app.insertBlockByName(name);
+  };
+})();
+
+/* ============================================================
+   ui.js (4) — Tabla y calculadora
+   ============================================================ */
+(function () {
+  'use strict';
+  var CAD = window.CAD, G = CAD.G;
+  var UI = CAD.UI;
+
+  function esc(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  UI.prototype.tableDialog = function (textH) {
+    var h = textH || 2.5;
+    var body =
+      '<div class="fields">' +
+      '<label>Título:</label><input type="text" id="tbTitle" value="TABLA">' +
+      '<label>Columnas:</label><input type="number" id="tbCols" min="1" max="12" value="3">' +
+      '<label>Filas de datos:</label><input type="number" id="tbRows" min="1" max="20" value="4">' +
+      '<label>Ancho de columna:</label><input type="number" id="tbCw" step="any" value="' + (h * 16).toFixed(2) + '">' +
+      '<label>Alto de fila:</label><input type="number" id="tbRh" step="any" value="' + (h * 2.4).toFixed(2) + '">' +
+      '<label>Altura de texto:</label><input type="number" id="tbH" step="any" value="' + h + '">' +
+      '</div>' +
+      '<fieldset><legend>Contenido</legend><div id="tbGrid" style="overflow:auto;max-height:230px"></div></fieldset>';
+    return this.dialog({
+      title: 'Insertar tabla', width: 560, body: body,
+      onOpen: function (b) {
+        function build() {
+          var nc = Math.max(1, Math.min(12, parseInt(b.querySelector('#tbCols').value, 10) || 3));
+          var nr = Math.max(1, Math.min(20, parseInt(b.querySelector('#tbRows').value, 10) || 4));
+          var html = '<table class="grid"><tbody>';
+          for (var r = 0; r < nr; r++) {
+            html += '<tr>';
+            for (var c = 0; c < nc; c++) {
+              var prev = b.querySelector('#tc' + r + '_' + c);
+              var v = prev ? prev.value : (r === 0 ? 'Col ' + (c + 1) : '');
+              html += '<td style="padding:1px"><input type="text" id="tc' + r + '_' + c +
+                '" value="' + esc(v) + '" style="width:100%;background:var(--chrome-2);border:1px solid var(--edge-soft);color:var(--ink);padding:2px 4px"></td>';
+            }
+            html += '</tr>';
+          }
+          b.querySelector('#tbGrid').innerHTML = html + '</tbody></table>';
+        }
+        b.querySelector('#tbCols').addEventListener('input', build);
+        b.querySelector('#tbRows').addEventListener('input', build);
+        build();
+      },
+      onOk: function (b) {
+        var nc = Math.max(1, Math.min(12, parseInt(b.querySelector('#tbCols').value, 10) || 3));
+        var nr = Math.max(1, Math.min(20, parseInt(b.querySelector('#tbRows').value, 10) || 4));
+        var data = [];
+        for (var r = 0; r < nr; r++) {
+          var row = [];
+          for (var c = 0; c < nc; c++) {
+            var el = b.querySelector('#tc' + r + '_' + c);
+            row.push(el ? el.value : '');
+          }
+          data.push(row);
+        }
+        return {
+          title: b.querySelector('#tbTitle').value.trim(),
+          cols: nc, rows: nr,
+          colw: parseFloat(b.querySelector('#tbCw').value) || 40,
+          rowh: parseFloat(b.querySelector('#tbRh').value) || 6,
+          h: parseFloat(b.querySelector('#tbH').value) || 2.5,
+          data: data
+        };
+      }
+    });
+  };
+
+  UI.prototype.calcDialog = function () {
+    var self = this, app = this.app;
+    var body =
+      '<div class="fields">' +
+      '<label>Expresión:</label><input type="text" id="qcIn" placeholder="120*3+sqrt(2)  ·  sin(30)  ·  pi*10^2">' +
+      '<label>Resultado:</label><input type="text" id="qcOut" readonly style="font-family:var(--font-mono);font-size:15px">' +
+      '</div>' +
+      '<div style="color:var(--ink-mute);margin-top:8px;font-size:11px">' +
+      'Operadores + − * / % ^ y paréntesis. Funciones: sin cos tan asin acos atan sqrt abs ln log exp round floor ceil. ' +
+      'Constantes: pi, e. Los ángulos van en grados.</div>' +
+      '<div id="qcHist" class="mono-out" style="margin-top:8px;max-height:140px"></div>';
+    return this.dialog({
+      title: 'Calculadora rápida', width: 460, body: body,
+      buttons: [{ label: 'Pegar en la línea de comandos', value: 'paste', primary: true }, { label: 'Cerrar', value: null }],
+      onOpen: function (b) {
+        var hist = [];
+        function evalNow() {
+          var v = b.querySelector('#qcIn').value.trim();
+          var out = b.querySelector('#qcOut');
+          if (!v) { out.value = ''; return; }
+          try {
+            var r = CAD.calc(v);
+            out.value = G.fmt(r, 6).replace(/\.?0+$/, '');
+            out.style.color = '';
+          } catch (e) {
+            out.value = e.message;
+            out.style.color = 'var(--err)';
+          }
+        }
+        b.querySelector('#qcIn').addEventListener('input', evalNow);
+        b.querySelector('#qcIn').addEventListener('keydown', function (e) {
+          if (e.key !== 'Enter') return;
+          e.preventDefault();
+          evalNow();
+          var v = b.querySelector('#qcIn').value.trim();
+          var r = b.querySelector('#qcOut').value;
+          if (v && r) {
+            hist.unshift(v + '  =  ' + r);
+            b.querySelector('#qcHist').textContent = hist.slice(0, 12).join('\n');
+          }
+        });
+        evalNow();
+      },
+      onOk: function (b) {
+        var r = b.querySelector('#qcOut').value;
+        if (!r || isNaN(parseFloat(r))) return false;
+        var inp = document.getElementById('cmdinput');
+        inp.value = r;
+        setTimeout(function () { inp.focus(); }, 30);
+        app.out('Calculadora: ' + b.querySelector('#qcIn').value + ' = ' + r);
+        return true;
+      }
+    });
   };
 })();

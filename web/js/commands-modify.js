@@ -647,6 +647,16 @@
         if (e1.kw === 'RA') {
           var nr = await ctx.getReal('Precise radio de empalme', { def: G.fmt(r, 4) });
           if (typeof nr === 'number') { r = Math.max(0, nr); ctx.app.filletR = r; }
+        } else if (e1.kw === 'P') {
+          var pe = await ctx.getEntity('Designe una polilínea 2D', {
+            filter: function (x) { return x.type === 'LWPOLYLINE'; }
+          });
+          if (!pe) return;
+          ctx.doc.mark('EMPALME');
+          var n = roundPline(pe.ent, r, true);
+          ctx.out(n + ' línea(s) empalmada(s).');
+          ctx.app.refresh();
+          return;
         }
         continue;
       }
@@ -779,6 +789,16 @@
           if (typeof a === 'number') d1 = a;
           if (typeof b === 'number') d2 = b;
           ctx.app.chamD1 = d1; ctx.app.chamD2 = d2;
+        } else if (e1.kw === 'P') {
+          var pc = await ctx.getEntity('Designe una polilínea 2D', {
+            filter: function (x) { return x.type === 'LWPOLYLINE'; }
+          });
+          if (!pc) return;
+          ctx.doc.mark('CHAFLAN');
+          var nc = roundPline(pc.ent, Math.min(d1, d2), false);
+          ctx.out(nc + ' línea(s) achaflanada(s).');
+          ctx.app.refresh();
+          return;
         }
         continue;
       }
@@ -1107,6 +1127,47 @@
       ctx.app.refresh();
     }
   });
+
+  /* Empalma o achaflana todos los vértices de una polilínea */
+  function roundPline(ent, r, arc) {
+    if (r <= 1e-9) return 0;
+    var v = ent.verts, n = v.length;
+    if (n < 3) return 0;
+    var out = [], done = 0;
+    var first = ent.closed ? 0 : 1;
+    var last = ent.closed ? n - 1 : n - 2;
+    if (!ent.closed) out.push({ x: v[0].x, y: v[0].y, b: v[0].b || 0 });
+    for (var i = first; i <= last; i++) {
+      var prev = v[(i - 1 + n) % n], cur = v[i], next = v[(i + 1) % n];
+      if (cur.b || prev.b) { out.push({ x: cur.x, y: cur.y, b: cur.b || 0 }); continue; }
+      var d1 = G.dist(prev, cur), d2 = G.dist(cur, next);
+      if (d1 < 1e-9 || d2 < 1e-9) { out.push({ x: cur.x, y: cur.y, b: 0 }); continue; }
+      var a1 = G.ang(cur, prev), a2 = G.ang(cur, next);
+      var ang = G.na(a2 - a1);
+      var half = Math.min(ang, G.TAU - ang) / 2;
+      if (half < 1e-6 || Math.abs(half - Math.PI / 2) > Math.PI / 2 - 1e-9) {
+        out.push({ x: cur.x, y: cur.y, b: 0 });
+        continue;
+      }
+      var t = arc ? r / Math.tan(half) : r;
+      t = Math.min(t, d1 * 0.49, d2 * 0.49);
+      if (t < 1e-9) { out.push({ x: cur.x, y: cur.y, b: 0 }); continue; }
+      var q1 = G.polar(cur, a1, t), q2 = G.polar(cur, a2, t);
+      var bulge = 0;
+      if (arc) {
+        var inc = Math.PI - 2 * half;
+        var ccw = G.cross(G.sub(cur, prev), G.sub(next, cur)) > 0;
+        bulge = Math.tan((ccw ? inc : -inc) / 4);
+      }
+      out.push({ x: q1.x, y: q1.y, b: bulge });
+      out.push({ x: q2.x, y: q2.y, b: 0 });
+      done++;
+    }
+    if (!ent.closed) out.push({ x: v[n - 1].x, y: v[n - 1].y, b: 0 });
+    if (done) ent.verts = out;
+    return done;
+  }
+  CAD.roundPline = roundPline;
 
   /* Exporta utilidades usadas por otros módulos */
   CAD.trimUtil = { pathOf: pathOf, subPath: subPath, pathParamOf: pathParamOf, entsFromVerts: entsFromVerts, boundaryPrims: boundaryPrims };
