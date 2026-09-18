@@ -371,10 +371,14 @@
     var z = ent.elev || 0;
     if (ent.type === 'CIRCLE') {
       var n = M.segFor(ent.r);
-      var o = [];
+      var o = [], oc = ent.ocs;
       for (var i = 0; i < n; i++) {
         var a = Math.PI * 2 * i / n;
-        o.push(v3(ent.c.x + ent.r * Math.cos(a), ent.c.y + ent.r * Math.sin(a), z));
+        var px = ent.c.x + ent.r * Math.cos(a), py = ent.c.y + ent.r * Math.sin(a);
+        if (oc) o.push(v3(oc.org.x + oc.x.x * px + oc.y.x * py,
+                          oc.org.y + oc.x.y * px + oc.y.y * py,
+                          oc.org.z + oc.x.z * px + oc.y.z * py));
+        else o.push(v3(px, py, z));
       }
       o.closed = true;
       return o;
@@ -390,7 +394,18 @@
     }
     var bpts = ptsOf(best);
     if (!bpts || bpts.length < 2) return null;
-    var pts3 = bpts.map(function (p) { return v3(p.x, p.y, p.z === undefined ? z : p.z); });
+    /* si la entidad nació sobre un plano de trabajo inclinado, sus
+       coordenadas son las de ese plano */
+    var ocs = ent.ocs;
+    var pts3 = bpts.map(function (p) {
+      if (ocs) {
+        var u = p.x, v = p.y, w = p.z === undefined ? 0 : p.z;
+        return v3(ocs.org.x + ocs.x.x * u + ocs.y.x * v + ocs.n.x * w,
+                  ocs.org.y + ocs.x.y * u + ocs.y.y * v + ocs.n.y * w,
+                  ocs.org.z + ocs.x.z * u + ocs.y.z * v + ocs.n.z * w);
+      }
+      return v3(p.x, p.y, p.z === undefined ? z : p.z);
+    });
     var closed = !!(best && best.closed);
     if (pts3.length > 2 && G3.dist2(pts3[0], pts3[pts3.length - 1]) < 1e-12) { pts3.pop(); closed = true; }
     if (ent.type === 'LWPOLYLINE' && ent.closed) closed = true;

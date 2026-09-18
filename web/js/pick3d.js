@@ -235,12 +235,11 @@
     }
     var segs = CAD.E.segs ? CAD.E.segs(e, app.doc) : null;
     if (!segs) return out;
-    var z = e.elev || 0;
     for (i = 0; i < segs.length; i++) {
       var pts = segs[i] && segs[i].pts ? segs[i].pts : segs[i];
       if (!pts) continue;
       for (var j = 0; j < pts.length; j++) {
-        var q = prj(v3(pts[j].x, pts[j].y, pts[j].z === undefined ? z : pts[j].z));
+        var q = prj(P3.world2d(e, pts[j]));
         if (q) out.push(q);
       }
     }
@@ -256,6 +255,19 @@
     }
     return false;
   }
+
+  /* Punto de una entidad 2D en coordenadas del mundo, teniendo en
+     cuenta el plano de trabajo sobre el que nació */
+  P3.world2d = function (ent, q) {
+    var o = ent.ocs;
+    if (o) {
+      var u = q.x, v = q.y, w = q.z === undefined ? 0 : q.z;
+      return v3(o.org.x + o.x.x * u + o.y.x * v + o.n.x * w,
+                o.org.y + o.x.y * u + o.y.y * v + o.n.y * w,
+                o.org.z + o.x.z * u + o.y.z * v + o.n.z * w);
+    }
+    return v3(q.x, q.y, q.z === undefined ? (ent.elev || 0) : q.z);
+  };
 
   /* --------- Marcador de captura sobre la superposición --------- */
   var COLOR = { ver: '#ffd166', mid: '#7ee787', cen: '#79c0ff', ari: '#c9a0ff', car: '#8be9fd', int: '#ff9f9f' };

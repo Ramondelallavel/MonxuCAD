@@ -330,20 +330,31 @@
         box = G3.boxMerge(box, bb);
         continue;
       }
-      /* entidades 2D: se dibujan como líneas a su elevación */
+      /* entidades 2D: se dibujan como líneas a su elevación, o sobre el
+         plano de trabajo en el que nacieron si lo tienen */
       var segs = CAD.E.segs ? CAD.E.segs(e, doc) : null;
       if (!segs) continue;
       var z = e.elev || 0;
+      var ocs = e.ocs;
+      function w3(q) {
+        if (ocs) {
+          var u = q.x, v = q.y, w = q.z === undefined ? 0 : q.z;
+          return { x: ocs.org.x + ocs.x.x * u + ocs.y.x * v + ocs.n.x * w,
+                   y: ocs.org.y + ocs.x.y * u + ocs.y.y * v + ocs.n.y * w,
+                   z: ocs.org.z + ocs.x.z * u + ocs.y.z * v + ocs.n.z * w };
+        }
+        return { x: q.x, y: q.y, z: q.z === undefined ? z : q.z };
+      }
       for (j = 0; j < segs.length; j++) {
         var pts = segs[j] && segs[j].pts ? segs[j].pts : segs[j];
         if (!pts || pts.length < 2) continue;
         if (segs[j] && segs[j].closed && pts.length > 2) pts = pts.concat([pts[0]]);
         for (k = 0; k + 1 < pts.length; k++) {
-          var pa = pts[k], pb = pts[k + 1];
-          LP.push(pa.x, pa.y, pa.z === undefined ? z : pa.z, pb.x, pb.y, pb.z === undefined ? z : pb.z);
+          var pa = w3(pts[k]), pb = w3(pts[k + 1]);
+          LP.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
           LC.push(c[0], c[1], c[2], c[0], c[1], c[2]);
-          G3.boxAdd(box, { x: pa.x, y: pa.y, z: pa.z === undefined ? z : pa.z });
-          G3.boxAdd(box, { x: pb.x, y: pb.y, z: pb.z === undefined ? z : pb.z });
+          G3.boxAdd(box, { x: pa.x, y: pa.y, z: pa.z });
+          G3.boxAdd(box, { x: pb.x, y: pb.y, z: pb.z });
         }
       }
     }
@@ -588,13 +599,12 @@
       if (e.hidden || e.type === 'SOLID3D' || e.type === 'MESH') continue;
       var segs = CAD.E.segs ? CAD.E.segs(e, app.doc) : null;
       if (!segs) continue;
-      var z = e.elev || 0;
       for (var j = 0; j < segs.length; j++) {
         var pts = segs[j] && segs[j].pts ? segs[j].pts : segs[j];
         if (!pts) continue;
         for (var k = 0; k + 1 < pts.length; k++) {
-          var a = s2({ x: pts[k].x, y: pts[k].y, z: pts[k].z === undefined ? z : pts[k].z });
-          var b = s2({ x: pts[k + 1].x, y: pts[k + 1].y, z: pts[k + 1].z === undefined ? z : pts[k + 1].z });
+          var a = s2(CAD.Pick3D ? CAD.Pick3D.world2d(e, pts[k]) : pts[k]);
+          var b = s2(CAD.Pick3D ? CAD.Pick3D.world2d(e, pts[k + 1]) : pts[k + 1]);
           if (!a || !b) continue;
           var d = segDist(sx, sy, a.x, a.y, b.x, b.y);
           if (d < bestD) { bestD = d; found = { ent: e, p: pts[k] }; }

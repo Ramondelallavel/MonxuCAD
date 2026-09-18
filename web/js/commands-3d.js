@@ -396,7 +396,16 @@
         var pp = S.profileOf(pathEnt, ctx.doc, 'high');
         if (pp) mesh = M.sweep(profs[i].pts, pp, { closedPath: !!pp.closed });
       } else {
-        mesh = M.extrude(profs[i].pts, dir || v3(0, 0, h), taper, []);
+        /* sin dirección expresa, se extruye perpendicular al propio
+           perfil: un perfil dibujado sobre una cara inclinada sale
+           perpendicular a ella, no según Z, que es lo que se espera. */
+        var dd = dir;
+        if (!dd) {
+          var nrm = G3.polyNormal(profs[i].pts);
+          if (!nrm || G3.len2(nrm) < 0.5) nrm = v3(0, 0, 1);
+          dd = G3.mul(G3.norm(nrm), h);
+        }
+        mesh = M.extrude(profs[i].pts, dd, taper, []);
       }
       if (!mesh || !mesh.faces.length) continue;
       var e = S.fromMesh(mesh, { layer: profs[i].ent.layer, color: profs[i].ent.color });

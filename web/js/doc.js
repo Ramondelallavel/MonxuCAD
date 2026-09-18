@@ -135,6 +135,22 @@
 
   Doc.prototype.add = function (ent) {
     if (!ent.id) ent.id = this.newId();
+    /* Con un plano de trabajo activo, lo que se dibuja recuerda sobre qué
+       plano nació: si es paralelo al XY basta con la elevación, y si está
+       inclinado se guarda el marco completo (OCS) para poder extruirlo y
+       dibujarlo en su sitio.  Sin plano, nada cambia. */
+    var wp = this.vars.WPLANE;
+    if (wp && ent.ocs === undefined && ent.type !== 'SOLID3D' && ent.type !== 'MESH') {
+      var n = wp.n;
+      if (Math.abs(n.x) < 1e-9 && Math.abs(n.y) < 1e-9 && Math.abs(Math.abs(n.z) - 1) < 1e-9) {
+        if (!ent.elev) ent.elev = wp.org.z || 0;
+      } else {
+        ent.ocs = { org: { x: wp.org.x, y: wp.org.y, z: wp.org.z },
+                    x: { x: wp.x.x, y: wp.x.y, z: wp.x.z },
+                    y: { x: wp.y.x, y: wp.y.y, z: wp.y.z },
+                    n: { x: n.x, y: n.y, z: n.z } };
+      }
+    }
     if (ent.layer === undefined) ent.layer = this.vars.CLAYER;
     if (ent.color === undefined) ent.color = this.vars.CECOLOR;
     if (ent.ltype === undefined) ent.ltype = this.vars.CELTYPE;
