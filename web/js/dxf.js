@@ -224,9 +224,23 @@
           W.p(0, 'SEQEND'); W.p(8, layerName(ent.layer, false));
         }
         break;
-      case 'SPLINE':
-        W.polyFromPts({ pts: E.splinePts(ent), closed: ent.closed }, ent, doc, owner);
+      case 'SPLINE': {
+        /* R12 no conoce la entidad SPLINE: allí sí hay que aplanarla. */
+        var bz = W.r2000 ? splineBezier(ent) : null;
+        if (!bz) { W.polyFromPts({ pts: E.splinePts(ent), closed: ent.closed }, ent, doc, owner); break; }
+        W.entHead('SPLINE', ent, doc, owner, 'AcDbSpline');
+        W.p(210, 0); W.p(220, 0); W.p(230, 1);
+        W.p(70, 8 | (ent.closed ? 3 : 0));   /* 8 = plana, 1+2 = cerrada y periódica */
+        W.p(71, 3);
+        W.p(72, bz.knots.length);
+        W.p(73, bz.ctrl.length);
+        W.p(74, bz.fit.length);
+        W.p(42, 1e-7); W.p(43, 1e-7); W.p(44, 1e-10);
+        bz.knots.forEach(function (k) { W.p(40, k); });
+        bz.ctrl.forEach(function (c) { W.p(10, c.x); W.p(20, c.y); W.p(30, 0); });
+        bz.fit.forEach(function (c) { W.p(11, c.x); W.p(21, c.y); W.p(31, 0); });
         break;
+      }
       case 'SOLID': {
         W.entHead('SOLID', ent, doc, owner, 'AcDbTrace');
         var q = ent.pts;
@@ -343,6 +357,39 @@
     W.p(70, ent.flags || 0);
     if (ent.valign) W.p(74, ent.valign);
   };
+
+  /* Convierte la spline —que se dibuja como Catmull-Rom por los puntos de
+     ajuste— en una B-spline de grado 3 en forma de Bézier: nudos interiores
+     triples, de modo que cada tramo es exactamente la curva que se ve en
+     pantalla.  Así el DXF lleva una SPLINE de verdad y cualquier programa
+     la reproduce igual, en vez de la polilínea aplanada de antes. */
+  function splineBezier(ent) {
+    var f = (ent.fit && ent.fit.length >= 2) ? ent.fit : ent.ctrl;
+    if (!f || f.length < 2) return null;
+    if (f.length === 2) {
+      return { knots: [0, 0, 0, 0, 1, 1, 1, 1], fit: f.slice(),
+               ctrl: [f[0],
+                      { x: f[0].x + (f[1].x - f[0].x) / 3, y: f[0].y + (f[1].y - f[0].y) / 3 },
+                      { x: f[0].x + 2 * (f[1].x - f[0].x) / 3, y: f[0].y + 2 * (f[1].y - f[0].y) / 3 },
+                      f[1]] };
+    }
+    var ext = ent.closed ? [f[f.length - 1]].concat(f, [f[0], f[1]])
+                         : [f[0]].concat(f, [f[f.length - 1]]);
+    var ctrl = [], n = 0;
+    for (var i = 1; i < ext.length - 2; i++) {
+      var p0 = ext[i - 1], p1 = ext[i], p2 = ext[i + 1], p3 = ext[i + 2];
+      if (!n) ctrl.push({ x: p1.x, y: p1.y });
+      ctrl.push({ x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6 });
+      ctrl.push({ x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6 });
+      ctrl.push({ x: p2.x, y: p2.y });
+      n++;
+    }
+    if (!n) return null;
+    var knots = [0, 0, 0, 0];
+    for (var j = 1; j < n; j++) { knots.push(j); knots.push(j); knots.push(j); }
+    knots.push(n); knots.push(n); knots.push(n); knots.push(n);
+    return { knots: knots, ctrl: ctrl, fit: f.slice() };
+  }
 
   Writer.prototype.polyFromPts = function (seg, ent, doc, owner) {
     if (!seg || !seg.pts || seg.pts.length < 2) return;
