@@ -78,24 +78,49 @@
     var ucs = (CAD.UCS && doc && !wcs) ? CAD.UCS : null;
     var ub = (ucs && !app.ignoreUCS) ? (doc.vars.UCSANG || 0) : 0;
 
-    /* polar: d<a */
-    var m = s.match(/^([-+0-9.,eE]+)\s*<\s*([-+0-9.,eE]+)$/);
+    var elev = (doc && doc.vars.ELEVATION) || 0;
+    var lastZ = (base && base.z !== undefined) ? base.z
+              : (app.lastPoint && app.lastPoint.z !== undefined ? app.lastPoint.z : elev);
+
+    /* esférica: d<a<b  (distancia, ángulo en XY, ángulo sobre XY) */
+    var ms = s.match(/^([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)$/);
+    if (ms) {
+      var dd2 = num(ms[1]), a2 = G.rad(num(ms[2])) + ub, b2 = G.rad(num(ms[3]));
+      if (isNaN(dd2) || isNaN(a2) || isNaN(b2)) return null;
+      var o2 = rel ? last : (ucs && !app.ignoreUCS ? ucs.u2w(doc, { x: 0, y: 0 }) : { x: 0, y: 0 });
+      var rxy = dd2 * Math.cos(b2);
+      return { p: { x: o2.x + rxy * Math.cos(a2), y: o2.y + rxy * Math.sin(a2),
+                    z: (rel ? lastZ : 0) + dd2 * Math.sin(b2) } };
+    }
+    /* polar y cilíndrica: d<a  ó  d<a,z */
+    var m = s.match(/^([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)(?:\s*,\s*([-+0-9.eE]+))?$/);
     if (m) {
       var d = num(m[1]), a = num(m[2]);
       if (isNaN(d) || isNaN(a)) return null;
       var o = rel ? last : (ucs && !app.ignoreUCS ? ucs.u2w(doc, { x: 0, y: 0 }) : { x: 0, y: 0 });
-      return { p: G.polar(o, G.rad(a) + ub, d) };
+      var pp = G.polar(o, G.rad(a) + ub, d);
+      if (m[3] !== undefined) {
+        var zc = num(m[3]);
+        if (!isNaN(zc)) pp.z = rel ? lastZ + zc : zc;
+      } else if (rel) pp.z = lastZ;
+      return { p: pp };
     }
-    /* cartesiano x,y */
+    /* cartesiano x,y  ó  x,y,z */
     var parts = s.split(/[;]|,(?=\s*[-+.\d])/);
     if (parts.length >= 2) {
       var x = num(parts[0]), y = num(parts[1]);
+      var z = parts.length >= 3 ? num(parts[2]) : NaN;
       if (!isNaN(x) && !isNaN(y)) {
+        var q;
         if (rel) {
           var v = (ucs && !app.ignoreUCS) ? ucs.vec2w(doc, { x: x, y: y }) : { x: x, y: y };
-          return { p: { x: last.x + v.x, y: last.y + v.y } };
+          q = { x: last.x + v.x, y: last.y + v.y };
+          q.z = isNaN(z) ? lastZ : lastZ + z;
+        } else {
+          q = (ucs && !app.ignoreUCS) ? ucs.u2w(doc, { x: x, y: y }) : { x: x, y: y };
+          if (!isNaN(z)) q.z = z;
         }
-        return { p: (ucs && !app.ignoreUCS) ? ucs.u2w(doc, { x: x, y: y }) : { x: x, y: y } };
+        return { p: q };
       }
     }
     /* distancia directa */
@@ -110,18 +135,31 @@
   }
   CAD.kwShort = kwShort;
 
+  /* Reconoce una opción escrita de tres formas, como AutoCAD:
+       - por sus mayúsculas ("aL" de "ambos Lados")
+       - por el principio del nombre ("amb")
+       - por el nombre completo tal como se muestra ("ambos Lados"),
+         ignorando espacios, acentos y puntuación en ambos lados. */
+  function norm(x) {
+    return String(x).toUpperCase()
+      .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+      .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
+      .replace(/[^A-Z0-9]/g, '');
+  }
   function matchKeyword(txt, kws) {
     if (!kws || !kws.length) return null;
-    var t = String(txt).trim().toUpperCase();
+    var raw = String(txt).trim().toUpperCase();
+    var t = norm(txt);
     if (!t) return null;
-    for (var i = 0; i < kws.length; i++) {
-      if (kwShort(kws[i]).toUpperCase() === t) return kws[i];
+    var i;
+    for (i = 0; i < kws.length; i++) if (norm(kwShort(kws[i])) === t) return kws[i];
+    for (i = 0; i < kws.length; i++) if (norm(kws[i]) === t) return kws[i];
+    var hit = null, many = false;
+    for (i = 0; i < kws.length; i++) {
+      if (norm(kws[i]).indexOf(t) === 0) { if (hit) many = true; else hit = kws[i]; }
     }
-    for (var j = 0; j < kws.length; j++) {
-      var full = kws[j].toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ0-9]/g, '');
-      if (full === t || full.indexOf(t) === 0) return kws[j];
-    }
-    return null;
+    if (hit && !many) return hit;
+    return hit;      /* con varias coincidencias se queda con la primera */
   }
   CAD.matchKeyword = matchKeyword;
 
@@ -154,12 +192,25 @@
   Ctx.prototype.out = function (s, cls) { this.app.out(s, cls); };
   Ctx.prototype.err = function (s) { this.app.out(s, 'err'); };
 
+  function fmtDef(d) {
+    if (d && typeof d === 'object') {
+      if (d.x !== undefined && d.y !== undefined) {
+        return G.fmt(d.x, 4) + ',' + G.fmt(d.y, 4) + (d.z ? ',' + G.fmt(d.z, 4) : '');
+      }
+      return '';
+    }
+    return String(d);
+  }
   function buildPrompt(msg, opts) {
     var s = msg;
     if (opts && opts.keywords && opts.keywords.length) s += ' [' + opts.keywords.join('/') + ']';
-    if (opts && opts.def !== undefined && opts.def !== null && opts.def !== '') s += ' <' + opts.def + '>';
+    if (opts && opts.def !== undefined && opts.def !== null && opts.def !== '') {
+      var d = fmtDef(opts.def);
+      if (d) s += ' <' + d + '>';
+    }
     return s + ': ';
   }
+  CAD.fmtDef = fmtDef;
 
   Ctx.prototype._ask = function (kind, msg, opts) {
     var app = this.app;

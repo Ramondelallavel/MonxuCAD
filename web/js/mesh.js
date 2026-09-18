@@ -275,14 +275,32 @@
   };
 
   /* Elimina caras degeneradas y vértices huérfanos */
-  Mesh.prototype.clean = function () {
+  /* Suelda vértices coincidentes, descarta las caras que ya no describen
+     nada y renumera.
+
+     `keepSlivers` decide qué hacer con las caras de área casi nula, que
+     aparecen al triangular contornos con vértices colineales:
+       - true  : se conservan.  Forman parte de la superficie y tirarlas
+                 abriría un agujero.  Es lo que necesitan la extrusión, la
+                 revolución, el barrido y el solevado para salir cerrados.
+       - false : se tiran (valor por omisión).  Es lo que necesitan los
+                 booleanos: una cara sin área no define plano y sólo
+                 ensucia el árbol BSP. */
+  Mesh.prototype.clean = function (keepSlivers) {
     this.weld(1e-7);
-    var keep = [], i;
+    var keep = [], i, j;
     for (i = 0; i < this.faces.length; i++) {
       var f = this.faces[i];
       if (f.length < 3) continue;
-      var pts = f.map(function (k) { return this.verts[k]; }, this);
-      if (G3.polyArea(pts) < 1e-12) continue;
+      /* al menos tres vértices distintos, si no la cara no existe */
+      var mark = {}, uniq = 0;
+      for (j = 0; j < f.length; j++) if (!mark[f[j]]) { mark[f[j]] = 1; uniq++; }
+      if (uniq < 3) continue;
+      if (!keepSlivers) {
+        var pts = [];
+        for (j = 0; j < f.length; j++) pts.push(this.verts[f[j]]);
+        if (G3.polyArea(pts) < 1e-12) continue;
+      }
       keep.push(f);
     }
     this.faces = keep;
@@ -590,6 +608,7 @@
      holes : [[pts], ...] contornos interiores (mismo plano) */
   M.extrude = function (prof, dir, taper, holes) {
     if (!prof || prof.length < 3) return null;
+    if (G3.len2(dir) < 1e-18) return null;      /* altura nula: no hay sólido */
     var n = G3.polyNormal(prof);
     if (G3.dot(n, dir) < 0) { prof = prof.slice().reverse(); n = G3.neg(n); }
     var H = G3.len(dir);
@@ -628,7 +647,7 @@
     var capB = M.capFaces(mesh.verts, base, true);
     var capT = M.capFaces(mesh.verts, topIdx, false);
     mesh.faces = mesh.faces.concat(capB, capT);
-    return mesh.clean();
+    return mesh.clean(true);
   };
 
   /* Tapas con agujeros: une los contornos interiores al exterior por el
@@ -728,7 +747,7 @@
         for (i = 0; i < rings.length; i++) mesh.faces.push([id(i, np - 1), id(i + 1, np - 1), cN]);
       }
     }
-    mesh.clean();
+    mesh.clean(true);
     if (mesh.volume() < 0) mesh.flip();
     return mesh;
   };
@@ -815,7 +834,7 @@
       if (G3.dot(n1, tan[frames.length - 1]) < 0) c1.reverse();
       mesh.faces.push(c0); mesh.faces.push(c1);
     }
-    return mesh.clean();
+    return mesh.clean(true);
   };
 
   function rotBetween(a, b) {
@@ -858,7 +877,7 @@
       if (G3.dot(n1, dir) < 0) c1.reverse();
       mesh.faces.push(c0); mesh.faces.push(c1);
     }
-    return mesh.clean();
+    return mesh.clean(true);
   };
 
   function resample(pts, n, closed) {
@@ -1057,7 +1076,7 @@
         nf.push([cur, epIdx.get(ekey(cur, next)), fpIdx[i], epIdx.get(ekey(prev, cur))]);
       }
     }
-    return new Mesh(nv, nf).clean();
+    return new Mesh(nv, nf).clean(true);
   };
 
   /* Comprobación de estanqueidad: toda arista debe tener 2 caras */

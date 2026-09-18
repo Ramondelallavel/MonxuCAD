@@ -21,6 +21,8 @@
     selCrossEdge: '#6ec071',
     lasso: 'rgba(38,118,207,0.16)',
     highlight: '#ffffff',
+    selGlow: 'rgba(120,190,255,0.55)',   /* resplandor del objeto designado */
+    hoverGlow: 'rgba(190,215,245,0.42)', /* previsualización al pasar el cursor */
     grip: '#1e6fd9',
     gripHover: '#ff8c1a',
     gripHot: '#e03131',
@@ -198,11 +200,15 @@
     if (app.selSet.length) {
       ctx.save();
       var lim = Math.min(app.selSet.length, 4000);
+      /* el resplandor sólo con pocos objetos: con miles no aporta y cuesta */
+      if (lim <= 600) for (var g = 0; g < lim; g++) self.drawEntity(app.selSet[g], doc, { glow: true });
       for (var i = 0; i < lim; i++) self.drawEntity(app.selSet[i], doc, { hl: true });
       ctx.restore();
       this.drawGrips();
     }
-    if (app.hoverEnt && app.selSet.indexOf(app.hoverEnt) < 0) {
+    if (app.hoverEnt && app.selSet.indexOf(app.hoverEnt) < 0 &&
+        doc.vars.SELECTIONPREVIEW !== 0) {
+      this.drawEntity(app.hoverEnt, doc, { glow: true, hoverGlow: true });
       this.drawEntity(app.hoverEnt, doc, { hover: true });
     }
     if (app.preview && app.preview.length) {
@@ -648,8 +654,17 @@
     }
     ctx.save();
     var col, lw = this.lwPx(ent, doc), dash = this.dashOf(ent, doc);
-    if (o.hl) { col = THEME.highlight; ctx.globalAlpha = 0.95; lw = Math.max(lw, 1.6); dash = [6, 4]; }
-    else if (o.hover) { col = '#dfe6ee'; lw = Math.max(lw, 1.6); }
+    if (o.glow) {
+      /* Resplandor ancho por debajo: es lo que hace que un objeto
+         designado se distinga aunque comparta color con el fondo de la
+         capa, igual que en AutoCAD desde 2015. */
+      col = o.hoverGlow ? THEME.hoverGlow : THEME.selGlow;
+      lw = Math.max(lw, 1) + (o.hoverGlow ? 3.5 : 4.5);
+      dash = null;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    }
+    else if (o.hl) { col = THEME.highlight; ctx.globalAlpha = 0.95; lw = Math.max(lw, 1.6); dash = [6, 4]; }
+    else if (o.hover) { col = '#eef4ff'; lw = Math.max(lw, 1.7); }
     else if (o.preview) { col = o.color || THEME.preview; lw = 1; dash = dash || null; }
     else col = this.colorOf(ent, doc);
     ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw;
