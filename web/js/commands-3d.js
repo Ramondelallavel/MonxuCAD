@@ -702,7 +702,7 @@
     ctx.doc.mark('ALINEAR3D');
     sel.forEach(function (e) {
       if (S.is3D(e)) S.xform(e, m, ctx.doc);
-      else E.transform(e, [m[0], m[1], m[4], m[5], m[12], m[13]], ctx.doc);
+      else E.transform(e, G.M(m[0], m[1], m[4], m[5], m[12], m[13]), ctx.doc);
     });
     ctx.app.refresh(true);
     ctx.out(sel.length + ' objeto(s) alineado(s).');
@@ -829,7 +829,7 @@
     var m = G3.mTrans(d.x - b.x, d.y - b.y, ((d.z || 0) - (b.z || 0)) + dz);
     sel.forEach(function (e) {
       if (S.is3D(e)) S.xform(e, m, ctx.doc);
-      else E.transform(e, [1, 0, 0, 1, d.x - b.x, d.y - b.y], ctx.doc);
+      else E.transform(e, G.M(1, 0, 0, 1, d.x - b.x, d.y - b.y), ctx.doc);
     });
     ctx.app.refresh(true);
     ctx.out(sel.length + ' objeto(s) desplazado(s).');

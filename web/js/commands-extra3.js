@@ -150,7 +150,7 @@
       var target = gap * (i + 1) * sgn;
       var dd = target - e._d;
       if (Math.abs(dd) < 1e-9) { delete e._d; return; }
-      E.transform(e, [1, 0, 0, 1, nrm.x * dd, nrm.y * dd], ctx.doc);
+      E.transform(e, G.M(1, 0, 0, 1, nrm.x * dd, nrm.y * dd), ctx.doc);
       delete e._d;
       n++;
     });
@@ -338,7 +338,7 @@
       c.id = 0;
       c.layer = to;
       ctx.doc.add(c);
-      if (dx || dy) E.transform(c, [1, 0, 0, 1, dx, dy], ctx.doc);
+      if (dx || dy) E.transform(c, G.M(1, 0, 0, 1, dx, dy), ctx.doc);
     });
     ctx.app.refresh(true);
     ctx.out(sel.length + ' objeto(s) copiado(s) a la capa "' + to + '".');

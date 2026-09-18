@@ -669,6 +669,10 @@
      Transformaciones
      ============================================================ */
   E.transform = function (ent, m, doc) {
+    /* La matriz afín 2D es {a,b,c,d,e,f}; se admite también la forma
+       [a,b,c,d,e,f] porque varias llamadas la pasaban así y el
+       resultado salía NaN sin avisar. */
+    if (m && m.length === 6 && m.a === undefined) m = G.M(m[0], m[1], m[2], m[3], m[4], m[5]);
     if (doc && doc.touch) doc.touch(ent); else if (E.invalidate) E.invalidate(ent);
     var sf = G.mScaleFactor(m), rot = G.mRotation(m), mir = G.mIsMirror(m);
     switch (ent.type) {

@@ -318,6 +318,46 @@
   /* Reparación de uniones en T: inserta en cada arista los vértices que
      caen sobre ella.  El recorte BSP deja estas uniones y sin repararlas
      la malla no es estanca (STL y CAM lo exigen). */
+  /* ------------------------------------------------------------
+     Caras "pellizcadas": un polígono que recorre la misma arista dos
+     veces (sale y vuelve por el mismo sitio).  Los booleanos y la
+     fusión de caras coplanares los producen de vez en cuando, y dejan
+     aristas con más de dos caras, lo que rompe la validez de un STL.
+     Se parte el polígono en los dos bucles que realmente lo forman.
+     ------------------------------------------------------------ */
+  Mesh.prototype.unpinch = function () {
+    var out = [], split = 0, i;
+    for (i = 0; i < this.faces.length; i++) {
+      var stack = [this.faces[i]], guard = 0;
+      while (stack.length && guard++ < 200) {
+        var f = stack.pop();
+        if (!f || f.length < 3) continue;
+        var seen = new Map(), cut = null, j;
+        for (j = 0; j < f.length; j++) {
+          var a = f[j], b = f[(j + 1) % f.length];
+          if (a === b) continue;
+          var k = a < b ? a + ',' + b : b + ',' + a;
+          if (seen.has(k)) { cut = { i: seen.get(k), j: j }; break; }
+          seen.set(k, j);
+        }
+        if (!cut) { out.push(f); continue; }
+        /* arista repetida entre las posiciones cut.i y cut.j */
+        var l1 = [], l2 = [], n = f.length;
+        for (j = cut.i + 1; j <= cut.j; j++) l1.push(f[j % n]);
+        for (j = cut.j + 1; j <= cut.i + n; j++) l2.push(f[j % n]);
+        /* el primer y el último vértice de cada bucle coinciden */
+        if (l1.length && l1[0] === l1[l1.length - 1]) l1.pop();
+        if (l2.length && l2[0] === l2[l2.length - 1]) l2.pop();
+        if (l1.length >= 3) stack.push(l1);
+        if (l2.length >= 3) stack.push(l2);
+        split++;
+      }
+    }
+    this.faces = out;
+    this.pinchFixes = split;
+    return this;
+  };
+
   Mesh.prototype.fixTJunctions = function (tol) {
     tol = tol || 1e-6;
     var V = this.verts, n = V.length, i, j;
@@ -687,6 +727,10 @@
   /* Revolución de un perfil (abierto o cerrado) alrededor de un eje */
   M.revolve = function (prof, axisPt, axisDir, angle, seg, closedProfile) {
     if (!prof || prof.length < 2) return null;
+    /* Un eje nulo o un ángulo nulo no generan sólido: antes salía una
+       malla degenerada de volumen cero en lugar de un aviso. */
+    if (!axisDir || G3.len2(axisDir) < 1e-18) return null;
+    if (!isFinite(angle) || Math.abs(angle) < 1e-9) return null;
     var full = Math.abs(Math.abs(angle) - TAU) < 1e-9;
     seg = Math.max(3, seg || Math.ceil(Math.abs(angle) / (Math.PI / 18)));
     var steps = full ? seg : seg;
@@ -839,6 +883,8 @@
 
   function rotBetween(a, b) {
     a = G3.norm(a); b = G3.norm(b);
+    /* Si alguno es nulo no hay giro que deducir: identidad. */
+    if (G3.len2(a) < 0.5 || G3.len2(b) < 0.5) return G3.ident();
     var d = G3.dot(a, b);
     if (d > 1 - 1e-12) return G3.ident();
     if (d < -1 + 1e-12) return G3.mRotAxis(null, G3.perp(a), Math.PI);
@@ -855,9 +901,21 @@
     opts = opts || {};
     if (!secs || secs.length < 2) return null;
     var closed = opts.closedSections !== false;
-    var n = opts.samples || Math.max.apply(null, secs.map(function (s) { return s.length; }));
-    n = Math.max(6, Math.min(400, n));
-    var R = secs.map(function (s) { return resample(s, n, closed); });
+    var R, n;
+    if (opts.samples) {
+      n = Math.max(3, Math.min(400, opts.samples));
+      R = secs.map(function (s) { return resample(s, n, closed); });
+    } else {
+      /* Se muestrean todas las secciones en la UNIÓN de sus parámetros de
+         longitud de arco.  Así cada vértice original cae exactamente en la
+         malla y las esquinas no se redondean: solevar dos rectángulos da un
+         tronco de pirámide exacto, como en AutoCAD.  El remuestreo uniforme
+         anterior se saltaba las esquinas. */
+      var us = unionParams(secs, closed);
+      n = us.length;
+      R = secs.map(function (s) { return sampleAt(s, us, closed); });
+    }
+    if (n < 3) return null;
     /* alineación por rotación del índice de arranque */
     for (var i = 1; i < R.length; i++) R[i] = alignStart(R[i - 1], R[i], closed);
     var mesh = new Mesh([], []), j;
@@ -879,6 +937,53 @@
     }
     return mesh.clean(true);
   };
+
+  /* Parámetros normalizados [0,1) de los vértices de un contorno */
+  function paramsOf(pts, closed) {
+    var P = pts.slice();
+    if (closed && P.length > 1 && G3.eq(P[0], P[P.length - 1], 1e-9)) P.pop();
+    var m = P.length, seg = closed ? m : m - 1, L = [0], i;
+    for (i = 0; i < seg; i++) L.push(L[i] + G3.dist(P[i], P[(i + 1) % m]));
+    var total = L[seg] || 1, out = [];
+    for (i = 0; i < m; i++) out.push(L[i] / total);
+    return out;
+  }
+  /* Unión ordenada de los parámetros de todas las secciones */
+  function unionParams(secs, closed) {
+    var all = [], i, j;
+    for (i = 0; i < secs.length; i++) {
+      var ps = paramsOf(secs[i], closed);
+      for (j = 0; j < ps.length; j++) all.push(ps[j]);
+    }
+    all.sort(function (a, b) { return a - b; });
+    var out = [], TOL = 1e-9;
+    for (i = 0; i < all.length; i++)
+      if (!out.length || all[i] - out[out.length - 1] > TOL) out.push(all[i]);
+    if (!closed && out[out.length - 1] < 1 - TOL) out.push(1);
+    if (out.length > 400) {           /* tope de seguridad */
+      var red = [], step = out.length / 400;
+      for (i = 0; i < 400; i++) red.push(out[Math.floor(i * step)]);
+      out = red;
+    }
+    return out;
+  }
+  /* Punto de un contorno en un parámetro de longitud de arco */
+  function sampleAt(pts, us, closed) {
+    var P = pts.slice();
+    if (closed && P.length > 1 && G3.eq(P[0], P[P.length - 1], 1e-9)) P.pop();
+    var m = P.length, seg = closed ? m : m - 1, L = [0], i;
+    for (i = 0; i < seg; i++) L.push(L[i] + G3.dist(P[i], P[(i + 1) % m]));
+    var total = L[seg] || 1, out = [], k = 0;
+    for (i = 0; i < us.length; i++) {
+      var d = Math.min(total, us[i] * total);
+      while (k < seg - 1 && L[k + 1] < d - 1e-12) k++;
+      while (k > 0 && L[k] > d + 1e-12) k--;
+      var den = Math.max(1e-12, L[k + 1] - L[k]);
+      var t = Math.max(0, Math.min(1, (d - L[k]) / den));
+      out.push(G3.lerp(P[k], P[(k + 1) % m], t));
+    }
+    return out;
+  }
 
   function resample(pts, n, closed) {
     var P = pts.slice();

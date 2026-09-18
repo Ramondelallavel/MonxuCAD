@@ -300,7 +300,8 @@
      booleanos (por ejemplo antes de exportar). */
   CSG.post = function (mesh, noMerge) {
     mesh.clean();
-    if (noMerge) { mesh.fixTJunctions(1e-6); return mesh; }
+    mesh.unpinch();
+    if (noMerge) { mesh.fixTJunctions(1e-6); mesh.unpinch(); return mesh; }
     /* Se guarda la malla sin fusionar: si la fusión deja aristas
        compartidas por más de dos caras (no-manifold), se descarta y se
        devuelve la versión sin fusionar, que siempre sale bien formada.
@@ -309,10 +310,13 @@
     var plain = mesh.clone();
     CSG.mergeCoplanar(mesh);
     mesh.clean();
+    mesh.unpinch();
     mesh.fixTJunctions(1e-6);
+    mesh.unpinch();
     var c = M.check(mesh);
     if (c.manifold) return mesh;
     plain.fixTJunctions(1e-6);
+    plain.unpinch();
     var c2 = M.check(plain);
     /* sólo se cambia si la versión sin fusionar es estrictamente mejor */
     if (c2.noManifold < c.noManifold || (c2.noManifold === c.noManifold && c2.abiertas < c.abiertas)) {

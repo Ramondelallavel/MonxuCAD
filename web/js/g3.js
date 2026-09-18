@@ -40,6 +40,7 @@
   /* Un vector cualquiera no paralelo a n (para construir bases) */
   G3.perp = function (n) {
     var ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    if (ax + ay + az < EPS) return v3(1, 0, 0);   /* vector nulo: vale cualquiera */
     var o = (ax <= ay && ax <= az) ? v3(1, 0, 0) : (ay <= az ? v3(0, 1, 0) : v3(0, 0, 1));
     return G3.norm(G3.cross(n, o));
   };
@@ -90,6 +91,9 @@
   /* Rotación alrededor de un eje arbitrario que pasa por un punto */
   G3.mRotAxis = function (pt, dir, ang) {
     var d = G3.norm(dir), c = Math.cos(ang), s = Math.sin(ang), t = 1 - c;
+    /* Girar alrededor de un eje nulo no es nada: sin esta guarda la
+       matriz salía singular y aplastaba la geometría contra un punto. */
+    if (!dir || d.x === 0 && d.y === 0 && d.z === 0) return G3.ident();
     var x = d.x, y = d.y, z = d.z;
     var r = [
       t * x * x + c,     t * x * y + s * z, t * x * z - s * y, 0,
@@ -104,6 +108,7 @@
   /* Matriz que lleva el plano XY al plano definido por origen+normal */
   G3.mPlane = function (org, normal, xdir) {
     var z = G3.norm(normal);
+    if (z.x === 0 && z.y === 0 && z.z === 0) z = v3(0, 0, 1);
     var x = xdir ? G3.norm(xdir) : G3.arbitraryAxis(z).x;
     x = G3.norm(G3.sub(x, G3.mul(z, G3.dot(x, z))));
     var y = G3.cross(z, x);

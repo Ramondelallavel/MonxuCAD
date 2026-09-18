@@ -53,6 +53,27 @@
       coolant: 'INUNDACION'
     }, o || {});
   };
+  /* Se sanea la herramienta: un diámetro nulo hacía que el número de
+     pasadas saliera infinito y el programa se quedaba colgado. */
+  var _tool0 = CAM.tool;
+  CAM.tool = function (o) {
+    var t = _tool0(o);
+    if (!isFinite(t.d) || t.d <= 0) t.d = 1;
+    if (!isFinite(t.r) || t.r < 0) t.r = 0;
+    return t;
+  };
+
+  /* Número de pasadas siempre finito y acotado */
+  function nPasses(total, step, max) {
+    var s = Math.abs(step);
+    if (!isFinite(s) || s < 1e-6) s = 1e-6;
+    var t = Math.abs(total);
+    if (!isFinite(t)) return 1;
+    var n = Math.ceil(t / s);
+    if (!isFinite(n) || n < 1) n = 1;
+    return Math.min(n, max || 20000);
+  }
+  CAM.nPasses = nPasses;
 
   /* Cálculo de régimen y avance a partir de vc y fz */
   CAM.cutting = function (tool, maxRpm, workDia) {
@@ -297,7 +318,7 @@
     if (mode === 'RAMPA') {
       var L = len || Math.max(tool.d * 1.5, 4);
       var dz = zFrom - zTo;
-      var passes = Math.max(1, Math.ceil(dz / (L * Math.tan(3 * Math.PI / 180))));
+      var passes = nPasses(dz, L * Math.tan(3 * Math.PI / 180), 5000);
       var step = dz / passes;
       var dirX = 1;
       for (var i = 0; i < passes; i++) {
@@ -311,7 +332,7 @@
       var r = Math.max(tool.d * 0.35, 1);
       var dzh = zFrom - zTo;
       var pitch = Math.max(0.2, tool.d * 0.08);
-      var turns = Math.max(1, Math.ceil(dzh / pitch));
+      var turns = nPasses(dzh, pitch, 2000);
       var segPerTurn = 24;
       path.rapid(x + r, y, undefined);
       for (var t = 1; t <= turns * segPerTurn; t++) {
@@ -411,7 +432,7 @@
     var out = [], d = zTop - zBot;
     if (d <= 0) return [zBot];
     step = Math.max(0.01, Math.abs(step));
-    var n = Math.ceil(d / step - 1e-9);
+    var n = Math.min(20000, Math.ceil(d / step - 1e-9));
     for (var i = 1; i <= n; i++) out.push(Math.max(zBot, zTop - step * i));
     if (!out.length) out.push(zBot);
     return out;
@@ -432,7 +453,7 @@
     }, op || {});
     var tool = op.tool, cut = CAM.cutting(tool, op.maxRpm);
     var r = tool.d / 2;
-    var so = Math.max(0.05, op.stepOver) * tool.d;
+    var so = Math.max(1e-3, Math.max(0.05, op.stepOver) * tool.d);
     var path = new Path(op.name, { tool: tool, feed: cut.feed, rpm: cut.rpm, op: 'vaciado' });
     path.add({ t: 'tool', tool: tool, rpm: cut.rpm, coolant: tool.coolant });
     path.comment(op.name + '  T' + tool.num + ' ' + tool.name);
@@ -659,7 +680,7 @@
     var path = new Path(op.name, { tool: tool, feed: cut.feed, rpm: cut.rpm, op: 'planeado' });
     path.add({ t: 'tool', tool: tool, rpm: cut.rpm, coolant: tool.coolant });
     path.comment(op.name);
-    var r = tool.d / 2, so = tool.d * op.stepOver;
+    var r = tool.d / 2, so = Math.max(1e-3, tool.d * op.stepOver);
     var ov = tool.d * op.overrun;
     var zs = zLevels(op.zTop, op.zBottom, op.stepDown);
     for (var zi = 0; zi < zs.length; zi++) {
@@ -768,7 +789,7 @@
     path.comment(op.name + '  Z ' + G3.fmt(zTop, 3) + ' .. ' + G3.fmt(zBot, 3));
     var stock = op.stockBox || { x1: bb.x1 - 1, y1: bb.y1 - 1, x2: bb.x2 + 1, y2: bb.y2 + 1 };
     var zs = zLevels(zTop, zBot, op.stepDown);
-    var r = tool.d / 2, so = tool.d * op.stepOver;
+    var r = tool.d / 2, so = Math.max(1e-3, tool.d * op.stepOver);
     for (var zi = 0; zi < zs.length; zi++) {
       var z = zs[zi];
       /* sección del modelo un pelín por encima del plano para coger la
@@ -832,7 +853,7 @@
     path.add({ t: 'tool', tool: tool, rpm: cut.rpm, coolant: tool.coolant });
     var bb = op.box || mesh.bbox();
     var ballR = tool.type === 'ESFERICA' ? tool.d / 2 : (tool.type === 'TORICA' ? tool.r : 0);
-    var so = tool.d * op.stepOver;
+    var so = Math.max(1e-3, tool.d * op.stepOver);
     var ang = (op.angle || 0) * Math.PI / 180;
     var ca = Math.cos(ang), sa = Math.sin(ang);
     path.comment(op.name + '  paso ' + G3.fmt(so, 3));
@@ -841,9 +862,9 @@
        rayo hasta tocar la pieza y se compensa el radio de la punta */
     var diag = Math.hypot(bb.x2 - bb.x1, bb.y2 - bb.y1);
     var cx = (bb.x1 + bb.x2) / 2, cy = (bb.y1 + bb.y2) / 2;
-    var nLines = Math.max(2, Math.ceil(diag / so));
+    var nLines = Math.max(2, nPasses(diag, so, 4000));
     var stepAlong = Math.max(0.15, Math.min(so, tool.d * 0.15));
-    var nAlong = Math.max(2, Math.ceil(diag / stepAlong));
+    var nAlong = Math.max(2, nPasses(diag, stepAlong, 4000));
     var zSafe = bb.z2 + 10;
     var flip = false;
     path.rapid(undefined, undefined, op.clearance);
@@ -1033,8 +1054,8 @@
     var path = new Path(op.name, { tool: tool, feed: cut.feed, rpm: cut.rpm, op: 'ranurado', lathe: true });
     path.add({ t: 'tool', tool: tool, rpm: cut.rpm, coolant: tool.coolant, lathe: true });
     var clrX = op.clearanceX === null ? op.rOuter + 5 : op.clearanceX;
-    var w = tool.d;
-    var nCuts = Math.max(1, Math.ceil((op.width - w) / (w * 0.75)) + 1);
+    var w = Math.max(1e-3, tool.d);
+    var nCuts = Math.min(2000, nPasses(op.width - w, w * 0.75, 2000) + 1);
     path.comment(op.name + '  ancho ' + G3.fmt(op.width, 3));
     for (var c = 0; c < nCuts; c++) {
       var z = op.z - (op.width - w) * (nCuts === 1 ? 0 : c / (nCuts - 1));
