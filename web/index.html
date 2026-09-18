@@ -27,7 +27,11 @@
 
   <!-- ══════════ Cinta de opciones ══════════ -->
   <nav id="ribbonTabs" role="tablist" aria-label="Cinta de opciones"></nav>
-  <section id="ribbon" aria-label="Paneles de la cinta"></section>
+  <div id="ribbonWrap">
+    <button id="rbPrev" class="rb-scroll" type="button" aria-label="Paneles anteriores" hidden>‹</button>
+    <section id="ribbon" aria-label="Paneles de la cinta"></section>
+    <button id="rbNext" class="rb-scroll" type="button" aria-label="Paneles siguientes" hidden>›</button>
+  </div>
 
   <!-- ══════════ Zona central ══════════ -->
   <main id="main">

@@ -171,6 +171,21 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   border-top-color: var(--accent);
 }
 
+/* La cinta no cabe entera en pantallas estrechas: se puede desplazar con
+   la rueda y con estos dos botones, que sólo asoman cuando hace falta. */
+#ribbonWrap { position: relative; display: flex; }
+#ribbonWrap > #ribbon { flex: 1 1 auto; min-width: 0; }
+.rb-scroll {
+  position: absolute; top: 0; bottom: 0; width: 18px; z-index: 5;
+  border: 0; cursor: pointer; padding: 0;
+  color: var(--ink); font-size: 15px; line-height: 1;
+  background: linear-gradient(90deg, var(--chrome-3) 55%, transparent);
+}
+.rb-scroll[hidden] { display: none; }
+#rbPrev { left: 0; }
+#rbNext { right: 0; background: linear-gradient(270deg, var(--chrome-3) 55%, transparent); }
+.rb-scroll:hover { color: #7fc3ff; }
+
 #ribbon {
   height: var(--h-ribbon);
   min-height: var(--h-ribbon);

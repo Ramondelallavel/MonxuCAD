@@ -516,7 +516,8 @@
       navbar: $('navbar'), layoutTabs: $('layoutTabs'), dynin: $('dynin'),
       dynA: $('dynA'), dynB: $('dynB'), dynSep: $('dynSep'), dynTip: $('dynTip'),
       snapTip: $('snapTip'), toast: $('toast'), search: $('searchBox'),
-      scaleLabel: $('scaleLabel'), file: $('fileInput'), ws: $('wsBtn')
+      scaleLabel: $('scaleLabel'), file: $('fileInput'), ws: $('wsBtn'),
+      rbPrev: $('rbPrev'), rbNext: $('rbNext')
     };
     this.buildQAT();
     this.buildRibbon();
@@ -530,6 +531,7 @@
     $('viewcube').addEventListener('click', function () { app.startCommand('ZOOM', ['E']); });
     $('scaleLabel').addEventListener('click', function (e) { self.scaleMenu(e.currentTarget); });
     if (this.el.ws) this.el.ws.addEventListener('click', function (e) { self.wsMenu(e.currentTarget); });
+    this.wireRibbonScroll();
     $('scaleLabel').style.cursor = 'pointer';
     $('cmdwin').addEventListener('contextmenu', function (e) {
       e.preventDefault();
@@ -564,6 +566,40 @@
     this.el.input.focus();
   };
 
+  /* ---------- Desplazamiento lateral de la cinta ----------
+     Con la ventana estrecha los últimos paneles quedaban fuera y no
+     había forma de llegar a ellos: la barra de desplazamiento del
+     navegador no se ve sobre un contenedor de esta altura. */
+  UI.prototype.wireRibbonScroll = function () {
+    var self = this, rb = this.el.ribbon;
+    if (!rb || this._rbScroll) return;
+    this._rbScroll = true;
+    rb.addEventListener('wheel', function (e) {
+      if (e.deltaY === 0 || rb.scrollWidth <= rb.clientWidth + 1) return;
+      e.preventDefault();
+      rb.scrollLeft += (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY);
+      self.syncRibbonScroll();
+    }, { passive: false });
+    rb.addEventListener('scroll', function () { self.syncRibbonScroll(); });
+    function pasa(d) {
+      return function () {
+        var p = rb.querySelector('.rpanel');
+        rb.scrollLeft += d * Math.max(160, p ? p.offsetWidth : 200);
+        self.syncRibbonScroll();
+      };
+    }
+    if (this.el.rbPrev) this.el.rbPrev.addEventListener('click', pasa(-1));
+    if (this.el.rbNext) this.el.rbNext.addEventListener('click', pasa(1));
+    window.addEventListener('resize', function () { self.syncRibbonScroll(); });
+  };
+  UI.prototype.syncRibbonScroll = function () {
+    var rb = this.el.ribbon, a = this.el.rbPrev, b = this.el.rbNext;
+    if (!rb || !a || !b) return;
+    var sobra = rb.scrollWidth - rb.clientWidth > 2 && !rb.classList.contains('collapsed');
+    a.hidden = !sobra || rb.scrollLeft <= 1;
+    b.hidden = !sobra || rb.scrollLeft >= rb.scrollWidth - rb.clientWidth - 1;
+  };
+
   /* ---------- Cinta ---------- */
   UI.prototype.buildRibbon = function () {
     var self = this;
@@ -583,6 +619,8 @@
     };
     this.el.tabs.ondblclick = function () {
       self.el.ribbon.classList.toggle('collapsed');
+      self.syncRibbonScroll();
+      self.app.resize && self.app.resize();
     };
 
     var tab = RIBBON.filter(function (t) { return t.id === self.activeTab; })[0] || RIBBON[0];
@@ -597,6 +635,8 @@
       html += '</div><div class="rpanel-title">' + p.label + '</div></div>';
     });
     this.el.ribbon.innerHTML = html;
+    this.el.ribbon.scrollLeft = 0;
+    this.syncRibbonScroll();
     this.el.ribbon.onclick = function (e) {
       var m = e.target.closest('[data-menu]');
       if (m) { self.flyout(m, JSON.parse(m.dataset.menu)); return; }
