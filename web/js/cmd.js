@@ -404,6 +404,15 @@
 
     switch (p.kind) {
       case 'point': {
+        /* Algunas peticiones de punto admiten además un número suelto:
+           el factor de escala de ZOOM se teclea así (2, 2X, 2XP). */
+        if (p.opts.allowNumber) {
+          var mz = String(t).trim().match(/^([-+0-9.eE]+)\s*(XP|X)?$/i);
+          if (mz) {
+            var vz = num(mz[1]);
+            if (!isNaN(vz)) { this.resolve({ num: vz, rel: !!mz[2], paper: /xp/i.test(mz[2] || '') }); return; }
+          }
+        }
         var r = CAD.parsePoint(t, this, p.opts.base);
         if (r && r.p) { this.acceptPoint(r.p); return; }
         if (r && r.dist !== undefined && p.opts.base) {
