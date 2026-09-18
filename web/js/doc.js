@@ -139,7 +139,7 @@
        plano nació: si es paralelo al XY basta con la elevación, y si está
        inclinado se guarda el marco completo (OCS) para poder extruirlo y
        dibujarlo en su sitio.  Sin plano, nada cambia. */
-    var wp = this.vars.WPLANE;
+    var wp = (CAD.APP && CAD.APP.is3D) ? this.vars.WPLANE : null;
     if (wp && ent.ocs === undefined && ent.type !== 'SOLID3D' && ent.type !== 'MESH') {
       var n = wp.n;
       if (Math.abs(n.x) < 1e-9 && Math.abs(n.y) < 1e-9 && Math.abs(Math.abs(n.z) - 1) < 1e-9) {

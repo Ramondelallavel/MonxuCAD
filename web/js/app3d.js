@@ -51,10 +51,30 @@
   };
 
   App.prototype.set3D = function (on) {
+    /* Pedir el modo en el que ya se está normaliza el estado transitorio
+       sin tocar la designación: es la forma natural de salir de algo
+       colgado (una órbita, un encuadre en tiempo real, una banda). */
+    if (!!on === !!this.is3D) {
+      /* No se cancela el comando en curso: ESTILOVISUAL y demás son
+         transparentes y llaman aquí desde dentro de otro comando. */
+      if (this.resetInteraction) this.resetInteraction({ keepSel: true });
+      this.refresh();
+      return this.is3D;
+    }
     if (on) {
+      /* El espacio 3D es el del modelo: en una presentación no hay nada
+         que modelar.  Se vuelve al modelo antes de entrar. */
+      if (this.paperMode) {
+        this.setLayout(-1);
+        this.out('Se vuelve al espacio modelo para trabajar en 3D.');
+      }
       this.ensure3D();
-      if (!this.view3d || !this.view3d.ok) return false;
+      if (!this.view3d || !this.view3d.ok) {
+        this.out('Este navegador no puede abrir la vista 3D (WebGL no disponible).', 'err');
+        return false;
+      }
       if (!this.is3D) {
+        if (this.leaveContext) this.leaveContext();
         this.is3D = true;
         this.cv3d.style.display = 'block';
         this.cvov.style.display = 'block';
@@ -70,6 +90,8 @@
         this.ui.setStatus3D && this.ui.setStatus3D(true);
       }
     } else if (this.is3D) {
+      if (this.leaveContext) this.leaveContext();
+      this.orbitMode = false;
       this.is3D = false;
       if (this.cv3d) this.cv3d.style.display = 'none';
       if (this.cvov) this.cvov.style.display = 'none';

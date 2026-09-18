@@ -192,23 +192,42 @@
   };
 
   App.prototype.setLayout = function (i) {
+    if (i >= 0 && !(this.doc.layouts && this.doc.layouts[i])) return;
+    /* Volver a pulsar la pestaña en la que ya se está normaliza el
+       estado: es el gesto con el que uno se recupera de algo atascado,
+       y antes no hacía absolutamente nada. */
+    if (i === this.layoutIndex && !this.activeVp) {
+      this.leaveContext();
+      this.ui.buildLayoutTabs();
+      this.refresh(true);
+      return;
+    }
     if (this.activeVp) this.exitVp(true);
+    /* El espacio papel es plano: la vista 3D no tiene sentido ahí. */
+    if (i >= 0 && this.is3D) {
+      this.set3D(false);
+      this.out('Se sale de la vista 3D: el espacio papel es plano.');
+    }
+    this.leaveContext();
     this.layoutIndex = i;
     this.paperMode = i >= 0;
     this.layout = i >= 0 ? this.doc.layouts[i] : null;
     this.doc.setSpace(this.paperMode ? this.layout.entities : null);
-    this.selSet = [];
-    this.preview = [];
     if (this.paperMode) {
       this.r.zoomBox({ x1: -18, y1: -18, x2: this.layout.w + 18, y2: this.layout.h + 18 });
-      this.r.paperView = this.r.view;
+      /* copia, nunca el mismo objeto: si se comparte, encuadrar en el
+         modelo movía también la vista guardada de la presentación */
+      this.r.paperView = { cx: this.r.view.cx, cy: this.r.view.cy, zoom: this.r.view.zoom };
     } else {
       var b = E.extentsAll(this.doc.entities, this.doc);
       if (G.bboxValid(b)) this.r.zoomBox(b);
+      if (this.r.view === this.r.paperView)
+        this.r.view = { cx: this.r.view.cx, cy: this.r.view.cy, zoom: this.r.view.zoom };
     }
     this.out(this.paperMode ? 'Regenerando presentación.' : 'Regenerando modelo.');
     this.ui.buildLayoutTabs();
-    this.refresh();
+    this.ui.syncStatus && this.ui.syncStatus();
+    this.refresh(true);
   };
 
   /* Entrar y salir del espacio modelo dentro de una ventana gráfica */
@@ -216,24 +235,25 @@
     if (!this.paperMode || !vp) return;
     if (this.activeVp === vp) return;
     if (this.activeVp) this.exitVp(true);
+    this.leaveContext();
     this.activeVp = vp;
     this.doc.setSpace(null);
     this.r.paperView = { cx: this.r.view.cx, cy: this.r.view.cy, zoom: this.r.view.zoom };
     this.r.view = this.r.vpView(vp, this.r.paperView);
-    this.selSet = [];
-    this.setPrompt('Comando: ');
     this.ui.syncStatus();
-    this.refresh();
+    this.refresh(true);
   };
   App.prototype.exitVp = function (quiet) {
-    if (!this.activeVp) return;
+    if (!this.activeVp) { this.leaveContext(); this.refresh(); return; }
+    this.leaveContext();
     this.activeVp = null;
     this.doc.setSpace(this.layout ? this.layout.entities : null);
-    this.r.view = this.r.paperView;
-    this.selSet = [];
+    /* copia: compartir el objeto hacía que encuadrar luego corrompiera
+       la vista guardada del papel */
+    this.r.view = { cx: this.r.paperView.cx, cy: this.r.paperView.cy, zoom: this.r.paperView.zoom };
     if (!quiet) this.out('Espacio papel.');
     this.ui.syncStatus();
-    this.refresh();
+    this.refresh(true);
   };
 
   /* Inserción de un bloque por nombre (paleta de bloques) */
@@ -819,6 +839,67 @@
     this.out('Punto de rastreo temporal');
     this.setPrompt('Precise el punto de rastreo temporal: ');
     this.refresh();
+  };
+
+  /* ------------------------------------------------------------
+     Estado transitorio de la interacción.
+
+     Todo lo que depende de lo que se estaba haciendo y del espacio
+     activo: resaltados, pinzamientos, bandas elásticas, ventanas de
+     designación, capturas, rastreos y modos en tiempo real.  Cambiar de
+     espacio o de modo sin vaciarlo dejaba referencias a objetos que ya
+     no están en el espacio activo, y de ahí venían los saltos raros al
+     pasar del modelo a una presentación o al 3D.
+     ------------------------------------------------------------ */
+  App.prototype.resetInteraction = function (opts) {
+    opts = opts || {};
+    this.hoverEnt = null;
+    this.hoverGrip = null;
+    this.hotGrip = null;
+    this.gripDrag = null;
+    this.gripMode = 0;
+    this.gripCopy = false;
+    this.pendingBase = false;
+    this.rubber = null;
+    this.preview = [];
+    this.pickBox = null;
+    this.pendBox = null;
+    this.lassoPath = null;
+    this.snapHit = null;
+    this.snap3d = null;
+    this.snap3dCands = null;
+    this.snapTab = 0;
+    this.snapTabAt = null;
+    this.trackLines = null;
+    this.trackLabel = null;
+    this.box3d = null;
+    this.dynLock = null;
+    this.dynTyping = false;
+    this.realtimePan = false;
+    this.realtimeZoom = false;
+    this.realtimeDone = null;
+    this.orbitMode = false;
+    this.osnapOverride = null;
+    this.pickedEntity = null;
+    this.mtpCollect = null;
+    this.fromCollect = null;
+    this.fromBase = null;
+    this.ttCollect = null;
+    this.lastSnapRef = null;
+    if (CAD.Track && CAD.Track.clear) CAD.Track.clear();
+    if (!opts.keepSel) this.selSet = [];
+    if (this.ui && this.ui.showSnapTip) this.ui.showSnapTip(null, null);
+  };
+
+  /* Deja el contexto actual en un estado limpio antes de cambiar de
+     espacio o de modo: cancela lo que hubiera en marcha y vacía el
+     estado transitorio.  Devuelve true si había algo que cancelar. */
+  App.prototype.leaveContext = function () {
+    var habia = !!(this.pending || this.gripDrag || this.realtimePan || this.realtimeZoom);
+    if (this.pending) this.cancel(true);
+    this.resetInteraction();
+    this.setPrompt('Comando: ');
+    return habia;
   };
 
   App.prototype.applyGrip = function (p) {

@@ -1264,6 +1264,32 @@
   /* ------------------------------------------------------------
      Diálogo genérico
      ------------------------------------------------------------ */
+  /* Diálogos abiertos, del más antiguo al más reciente.  Sirve para
+     saber si hay un modal en marcha y para cerrar el de arriba con
+     Escape aunque el foco se haya escapado del diálogo. */
+  UI.abiertos = [];
+  /* La verdad la tiene el DOM: si un diálogo desapareció por otra vía,
+     la pila se purga sola en lugar de dejar la aplicación bloqueada
+     creyendo que hay un modal abierto. */
+  UI.hayModal = function () {
+    var vivos = document.querySelectorAll('#modalRoot .modal-back').length;
+    if (!vivos) UI.abiertos.length = 0;
+    return vivos > 0;
+  };
+  if (!UI._escGlobal) {
+    UI._escGlobal = true;
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || !UI.hayModal()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (UI.abiertos.length) UI.abiertos[UI.abiertos.length - 1](null);
+      else {
+        var d = document.querySelector('#modalRoot .modal-back:last-child');
+        if (d) d.remove();
+      }
+    }, true);
+  }
+
   UI.prototype.dialog = function (opts) {
     var self = this;
     return new Promise(function (resolve) {
@@ -1277,6 +1303,7 @@
         (opts.buttons === null ? '' : '<div class="dlg-foot"></div>') +
         '</div>';
       var dlg = back.querySelector('.dlg');
+      dlg.tabIndex = -1;                 /* para poder enfocarlo aunque no tenga campos */
       var body = back.querySelector('.dlg-body');
       if (typeof opts.body === 'string') body.innerHTML = opts.body;
       else if (opts.body) body.appendChild(opts.body);
@@ -1285,6 +1312,8 @@
       function close(v) {
         if (done) return;
         done = true;
+        var i = UI.abiertos.indexOf(close);
+        if (i >= 0) UI.abiertos.splice(i, 1);
         back.remove();
         self.app.focusCmd();
         resolve(v);
@@ -1333,9 +1362,15 @@
       window.addEventListener('mouseup', function () { drag = null; });
 
       document.getElementById('modalRoot').appendChild(back);
+      UI.abiertos.push(close);
       if (opts.onOpen) opts.onOpen(body, close);
-      var f = body.querySelector('input,textarea,select,button');
-      if (f) f.focus();
+      /* El foco tiene que caer DENTRO del diálogo: si se quedaba en la
+         línea de comandos, Escape no llegaba aquí y el diálogo no había
+         forma de cerrarlo con el teclado. */
+      var f = body.querySelector('input:not([type=hidden]),textarea,select,button') ||
+              back.querySelector('.dlg-foot .btn') || dlg;
+      try { f.focus(); } catch (e) { dlg.focus(); }
+      if (!back.contains(document.activeElement)) dlg.focus();
     });
   };
 

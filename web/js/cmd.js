@@ -73,7 +73,10 @@
      AutoCAD.  Con el prefijo * se escriben en coordenadas del mundo.
      ------------------------------------------------------------ */
   CAD.parsePoint = function (txt, app, base, dir) {
-    var pl = (CAD.WPlane && app && app.doc) ? CAD.WPlane.get(app.doc) : null;
+    /* El plano de trabajo sólo gobierna lo que se teclea dentro del
+       espacio 3D: en la vista 2D lo tecleado son coordenadas del plano
+       del dibujo, como siempre. */
+    var pl = (CAD.WPlane && app && app.doc && app.is3D) ? CAD.WPlane.get(app.doc) : null;
     if (!pl || String(txt).trim()[0] === '*') return parsePointRaw(txt, app, base, dir);
 
     var W = CAD.WPlane, G3 = CAD.G3;
@@ -394,6 +397,12 @@
     var app = this;
     var txt = String(line || '').trim();
     if (!txt) return;
+    /* Con un diálogo modal abierto no se arranca otro comando: antes se
+       podían apilar tres o cuatro diálogos uno encima de otro. */
+    if (CAD.UI && CAD.UI.hayModal && CAD.UI.hayModal()) {
+      this.out('Cierre antes el cuadro de diálogo abierto.', 'warn');
+      return;
+    }
     if (this.pending) { this.feedText(txt); return; }
     var def = Cmd.find(txt);
     if (!def) {
@@ -412,6 +421,10 @@
     var app = this;
     var def = Cmd.reg[name.toUpperCase()] || Cmd.find(name);
     if (!def) { this.out('Comando desconocido "' + name + '"', 'err'); return; }
+    if (CAD.UI && CAD.UI.hayModal && CAD.UI.hayModal() && !this._dentroDeDialogo) {
+      this.out('Cierre antes el cuadro de diálogo abierto.', 'warn');
+      return;
+    }
 
     if (this.pending && def.transparent) {
       /* comando transparente: se ejecuta sin interrumpir */
@@ -476,20 +489,24 @@
   };
 
   Engine.cancel = function (silent) {
-    this.pickedEntity = null;
     if (this.clearPendBox) this.clearPendBox();
-    this.mtpCollect = null;
-    this.osnapOverride = null;
     this.multipleCmd = null;
-    if (this.pending) {
+    var habiaPend = !!this.pending;
+    if (habiaPend) {
       var rj = this.pending.reject;
       this.pending = null;
       rj(CANCEL);
-    } else if (this.selSet.length) {
-      this.selSet = [];
-      this.refresh();
     }
+    /* Escape deja el tablero limpio, como en AutoCAD: además del comando
+       en curso se vacía todo el estado transitorio (pinzamientos, bandas,
+       ventanas de designación, rastreos, capturas forzadas…).  Antes
+       quedaban colgados y se arrastraban al comando siguiente o al
+       cambiar de espacio. */
+    if (this.resetInteraction) this.resetInteraction({ keepSel: habiaPend });
+    else { this.pickedEntity = null; this.mtpCollect = null; this.osnapOverride = null; }
+    if (!habiaPend && this.selSet.length) this.selSet = [];
     if (!silent) this.setPrompt('Comando: ');
+    this.refresh();
   };
 
   /* ---------- Entrada de texto ---------- */
