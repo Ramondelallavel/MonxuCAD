@@ -8,10 +8,16 @@ más sencilla a la más completa.
 
 El repositorio ya trae el flujo de trabajo `.github/workflows/pages.yml`.
 
-1. Entra en **Settings ▸ Pages**.
-2. En **Source**, elige **GitHub Actions**.
-3. Fusiona esta rama en `main` (o pulsa **Run workflow** en la pestaña
-   **Actions ▸ Publicar en GitHub Pages**).
+1. Entra en **Settings ▸ Pages** del repositorio.
+2. En **Build and deployment ▸ Source**, elige **GitHub Actions**.
+3. Ve a **Actions ▸ Publicar en GitHub Pages** y pulsa **Run workflow**
+   sobre la rama `claude/serene-dijkstra-7fyzv7` (o fusiónala en `main`,
+   que también dispara la publicación).
+
+Ese primer ajuste hay que hacerlo a mano una sola vez: el testigo con el que
+corre el flujo no tiene permiso para crear el sitio de Pages, y mientras no
+esté activado el trabajo falla con *«Resource not accessible by integration»*.
+Una vez activado, cada envío publica solo.
 
 A los dos o tres minutos la aplicación queda en:
 

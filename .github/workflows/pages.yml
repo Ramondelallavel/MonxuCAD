@@ -1,5 +1,7 @@
 # Publica la aplicación en GitHub Pages.
-# El propio flujo activa Pages la primera vez (enablement: true).
+# ANTES DE LA PRIMERA VEZ, una sola vez:
+#   Settings ▸ Pages ▸ Build and deployment ▸ Source = "GitHub Actions"
+# A partir de ahí cada envío a la rama publica la aplicación.
 name: Publicar en GitHub Pages
 
 on:
@@ -40,11 +42,10 @@ jobs:
           done
           exit $fallo
 
+      # El testigo del flujo no tiene permiso para crear el sitio de Pages
+      # ("Resource not accessible by integration"), así que hay que
+      # activarlo una sola vez a mano; después este paso ya lo encuentra.
       - uses: actions/configure-pages@v5
-        # enablement activa Pages en el repositorio la primera vez, para
-        # no tener que entrar a Settings ▸ Pages a mano.
-        with:
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
