@@ -78,6 +78,53 @@
     this.out('AYUDA lista los ' + Object.keys(CAD.Cmd.reg).length + ' comandos.  ABRE importa DXF.  EXPORTAR escribe DXF/PDF/SVG.');
   };
 
+  /* Bloqueo de campo de la entrada dinámica (tecla Tab).
+     En AutoCAD, al bloquear la distancia o el ángulo el cursor queda
+     restringido a ese valor; aquí se proyecta el punto resuelto. */
+  App.prototype.applyDynLock = function (base, wp) {
+    var L = this.dynLock;
+    if (!L || !wp) return wp;
+    var a = L.dynA !== undefined && L.dynA !== '' ? parseFloat(L.dynA) : null;
+    var b = L.dynB !== undefined && L.dynB !== '' ? parseFloat(L.dynB) : null;
+    if (a !== null && !isFinite(a)) a = null;
+    if (b !== null && !isFinite(b)) b = null;
+    if (a === null && b === null) return wp;
+    if (L.sep === '<') {
+      if (!base) return wp;
+      var d = a !== null ? a : G.dist(base, wp);
+      var ang = b !== null ? G.rad(b) : G.ang(base, wp);
+      return G.polar(base, ang, d);
+    }
+    var x = wp.x, y = wp.y;
+    if (a !== null) x = base ? base.x + a : a;
+    if (b !== null) y = base ? base.y + b : b;
+    return { x: x, y: y };
+  };
+
+  /* Envía lo escrito en los campos de la entrada dinámica.
+     En AutoCAD, a partir del segundo punto lo que se teclea ahí es
+     RELATIVO al punto anterior (DYNPICOORDS = 0); anteponiendo # se
+     fuerza absoluto.  En la línea de comandos, en cambio, se sigue
+     interpretando como absoluto salvo que se escriba @. */
+  App.prototype.commitDyn = function () {
+    var A = document.getElementById('dynA'), B = document.getElementById('dynB');
+    var a = String(A.value || '').trim(), b = String(B.value || '').trim();
+    var sep = document.getElementById('dynSep').textContent;
+    this.dynLock = null;
+    if (!a && !b) { this.focusCmd(); return; }
+    var abs = false;
+    if (a[0] === '#') { abs = true; a = a.slice(1); }
+    if (b[0] === '#') { abs = true; b = b.slice(1); }
+    var rel = sep === '<';
+    if (!rel && !abs) {
+      var p = this.pending;
+      var dyn = this.doc.vars.DYNMODE && (this.doc.vars.DYNPICOORDS === undefined ? 0 : this.doc.vars.DYNPICOORDS) === 0;
+      if (dyn && p && p.kind === 'point' && p.opts.base) rel = true;
+    }
+    this.feedInput((rel ? '@' : '') + a + sep + b);
+    this.focusCmd();
+  };
+
   App.prototype.focusCmd = function () {
     var i = document.getElementById('cmdinput');
     if (i && document.activeElement !== i) i.focus();
@@ -526,6 +573,7 @@
 
     var res = CAD.Snap.resolve(this, sp, base, { noOsnap: !this.osnapOn && !this.osnapOverride });
     this.cursorWorld = res.p;
+    if (this.dynLock && p && p.kind === 'point') this.cursorWorld = this.applyDynLock(base, this.cursorWorld);
     this.snapHit = res.snap;
     this.trackLines = res.tracks && res.tracks.length ? res.tracks : null;
     this.trackLabel = res.label || null;
@@ -847,12 +895,22 @@
       el.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
-          var a = document.getElementById('dynA').value, b = document.getElementById('dynB').value;
-          var sep = document.getElementById('dynSep').textContent;
-          self.feedInput((sep === '<' ? '@' : '') + a + sep + b);
-          self.focusCmd();
+          self.commitDyn();
         } else if (e.key === 'Escape') { self.focusCmd(); self.cancel(); }
+        else if (e.key === 'Tab') {
+          /* Tab bloquea el campo y pasa al otro, como en AutoCAD */
+          e.preventDefault();
+          var other = id === 'dynA' ? 'dynB' : 'dynA';
+          self.dynLock = self.dynLock || {};
+          self.dynLock.sep = document.getElementById('dynSep').textContent;
+          self.dynLock[id] = document.getElementById(id).value;
+          var o = document.getElementById(other);
+          o.focus(); o.select();
+          self.refresh();
+        }
       });
+      el.addEventListener('focus', function () { self.dynTyping = true; });
+      el.addEventListener('blur', function () { self.dynTyping = false; });
     });
   };
 

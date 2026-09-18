@@ -366,6 +366,7 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
   font-family: var(--font-mono);
 }
 .dyn-row input:focus { border-color: var(--accent-2); outline: none; background: #11151a; }
+.dyn-row input.locked { border-color: #ffb454; color: #ffd28a; background: #1a1409; }
 .dyn-sep { color: #cfd6de; font-size: 11px; }
 .dyn-tip {
   margin-top: 3px;

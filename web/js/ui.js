@@ -896,16 +896,26 @@
     d.style.top = Math.min(wrapRect.height - 70, app.cursorScreen.y + 16) + 'px';
     var pr = Math.min(4, doc.vars.LUPREC);
     var w = app.cursorWorld || { x: 0, y: 0 };
+    /* Un campo que el usuario está tecleando o que ha bloqueado con Tab
+       no se refresca con el cursor, igual que en AutoCAD. */
+    var lock = app.dynLock || {};
+    var act = document.activeElement;
+    function held(el, id) {
+      return (lock[id] !== undefined && lock[id] !== '') || (act === el && app.dynTyping);
+    }
+    var hA = held(this.el.dynA, 'dynA'), hB = held(this.el.dynB, 'dynB');
     if (p && p.kind === 'point' && p.opts.base) {
       var dist = G.dist(p.opts.base, w), ang = G.deg(G.na(G.ang(p.opts.base, w)));
-      this.el.dynA.value = G.fmt(dist, pr);
-      this.el.dynB.value = G.fmt(ang, 0);
+      if (!hA) this.el.dynA.value = G.fmt(dist, pr);
+      if (!hB) this.el.dynB.value = G.fmt(ang, 0);
       this.el.dynSep.textContent = '<';
     } else {
-      this.el.dynA.value = G.fmt(w.x, pr);
-      this.el.dynB.value = G.fmt(w.y, pr);
+      if (!hA) this.el.dynA.value = G.fmt(w.x, pr);
+      if (!hB) this.el.dynB.value = G.fmt(w.y, pr);
       this.el.dynSep.textContent = ',';
     }
+    this.el.dynA.classList.toggle('locked', !!(lock.dynA !== undefined && lock.dynA !== ''));
+    this.el.dynB.classList.toggle('locked', !!(lock.dynB !== undefined && lock.dynB !== ''));
     var tipText = p ? p.text : 'Comando:';
     this.el.dynTip.textContent = tipText;
     this.el.dynTip.hidden = !tipText;
