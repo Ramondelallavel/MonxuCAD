@@ -1,7 +1,12 @@
 # Publica la aplicación en GitHub Pages.
+#
 # ANTES DE LA PRIMERA VEZ, una sola vez:
 #   Settings ▸ Pages ▸ Build and deployment ▸ Source = "GitHub Actions"
-# A partir de ahí cada envío a la rama publica la aplicación.
+#
+# Ese ajuste sólo puede darlo el dueño del repositorio: el testigo con el
+# que corre el flujo no tiene permiso para crear el sitio de Pages.
+# Mientras no esté dado, el flujo comprueba igualmente que el sitio se
+# arma bien y avisa de lo que falta, en lugar de fallar.
 name: Publicar en GitHub Pages
 
 on:
@@ -21,6 +26,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.estado.outputs.activado }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,18 +47,35 @@ jobs:
           for f in $(grep -o 'js/[a-z0-9-]*\.js' _site/index.html | sort -u); do
             if [ ! -f "_site/$f" ]; then echo "FALTA: $f"; fallo=1; fi
           done
+          if [ ! -s _site/index.html ]; then echo "FALTA: index.html"; fallo=1; fi
+          if [ ! -s _site/app.css ]; then echo "FALTA: app.css"; fallo=1; fi
+          echo "Scripts comprobados: $(grep -c 'script src' _site/index.html)"
           exit $fallo
 
-      # El testigo del flujo no tiene permiso para crear el sitio de Pages
-      # ("Resource not accessible by integration"), así que hay que
-      # activarlo una sola vez a mano; después este paso ya lo encuentra.
+      # ¿Está Pages activado? Si no lo está, configure-pages abortaría el
+      # trabajo entero por un ajuste que este flujo no puede dar.
+      - name: ¿Hay sitio de Pages?
+        id: estado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" >/dev/null 2>&1; then
+            echo "activado=si" >> "$GITHUB_OUTPUT"
+          else
+            echo "activado=no" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Pages sin activar::El sitio se ha armado bien, pero no se publica porque GitHub Pages no está activado en este repositorio. Actívelo una sola vez en Settings ▸ Pages ▸ Build and deployment ▸ Source = \"GitHub Actions\" y vuelva a lanzar este flujo."
+          fi
+
       - uses: actions/configure-pages@v5
+        if: steps.estado.outputs.activado == 'si'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.estado.outputs.activado == 'si'
         with:
           path: _site
 
   deploy:
     needs: build
+    if: needs.build.outputs.pages == 'si'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
