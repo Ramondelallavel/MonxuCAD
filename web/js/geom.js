@@ -88,6 +88,20 @@
   G.mScaleFactor = function (m) { return Math.sqrt(Math.abs(G.mDet(m))) || 1; };
   G.mRotation = function (m) { return Math.atan2(m.b, m.a); };
   G.mIsMirror = function (m) { return G.mDet(m) < 0; };
+  /* Inversa de la matriz afín; nula si es singular */
+  G.mInv = function (m) {
+    var det = m.a * m.d - m.b * m.c;
+    if (Math.abs(det) < 1e-14) return null;
+    var ia = m.d / det, ib = -m.b / det, ic = -m.c / det, id = m.a / det;
+    return M(ia, ib, ic, id,
+             -(ia * m.e + ic * m.f), -(ib * m.e + id * m.f));
+  };
+  /* Ángulo llevado al intervalo (-π, π] */
+  G.normAng = function (a) {
+    while (a <= -Math.PI) a += Math.PI * 2;
+    while (a > Math.PI) a -= Math.PI * 2;
+    return a;
+  };
 
   /* ---------- Punto más cercano ---------- */
   G.closestOnSeg = function (p, a, b) {
