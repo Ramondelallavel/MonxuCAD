@@ -1249,4 +1249,180 @@
             '.   PLANOTRABAJO Global lo devuelve al XY.');
   });
 
+
+  /* ============================================================
+     TALADRO — asistente de taladros
+
+     Sobre una cara de un sólido: centro, diámetro y profundidad, con
+     avellanado, caja o punta de broca, y roscado métrico opcional.  Se
+     resta como una operación más del árbol, de modo que después se le
+     puede cambiar el diámetro.  Es el equivalente del Hole Wizard.
+     ============================================================ */
+  Cmd.add(['TALADRO', 'HOLE', 'AGUJERO', 'BROCA'],
+  { group: '3d', icon: 'hole', title: 'Taladro' },
+  async function (ctx) {
+    var W = CAD.WPlane;
+    var r = await ctx.getEntity('Designe la cara donde se taladra', {
+      filter: function (x) { return S.is3D(x); }
+    });
+    if (!r || !r.ent) return;
+    var ent = r.ent, mesh = S.meshOf(ent);
+    if (!mesh) { ctx.err('El sólido no tiene malla.'); return; }
+    var fi = caraSenalada(ctx, ent, mesh, r);
+    if (fi === null) { ctx.err('No se ha podido determinar la cara.'); return; }
+    var reg = mesh.planarRegion(fi);
+    var n = G3.norm(reg.n);
+    var f = mesh.faces[fi];
+    var plCara = W.fromNormal(mesh.faceCenter(f), n, G3.sub(mesh.verts[f[1]], mesh.verts[f[0]]));
+
+    /* el plano de trabajo pasa a la cara mientras dura el comando, para
+       que el centro se señale sobre ella */
+    var previo = W.get(ctx.doc);
+    W.set(ctx.doc, plCara);
+    ctx.app.refresh();
+
+    var centro = null, d = null, prof = null, tipo = null, rosca = null;
+    try {
+      centro = await ctx.getPoint('Precise el centro del taladro');
+      if (!pt(centro)) return;
+      d = await ctx.getDist('Precise el diámetro', { def: ctx.app.lastHoleD || 8, base: centro });
+      if (!num(d) || d <= 0) return;
+      ctx.app.lastHoleD = d;
+      var kp = await ctx.getKeyword('Profundidad', ['Pasante', 'Ciega'], { def: 'Pasante' });
+      if (!kp) return;
+      if (kp.kw === 'C') {
+        prof = await ctx.getDist('Precise la profundidad', { def: d * 2, base: centro });
+        if (!num(prof) || prof <= 0) return;
+      }
+      tipo = await ctx.getKeyword('Cabeza', ['Recta', 'Avellanada', 'Caja'], { def: 'Recta' });
+      rosca = await ctx.getKeyword('¿Roscado métrico?', ['No', 'Sí'], { def: 'No' });
+    } finally {
+      W.set(ctx.doc, previo);
+    }
+
+    /* profundidad pasante: se atraviesa toda la pieza */
+    var bb = mesh.bbox();
+    var diag = G3.boxDiag(bb) + 10;
+    var pasante = !prof;
+    var L = pasante ? diag * 1.2 : prof;
+    var cen = v3(centro.x, centro.y, centro.z || 0);
+
+    /* el taladro se construye en local (eje Z) y se coloca con la matriz
+       del plano de la cara, entrando hacia dentro del material */
+    var piezas = [];
+    var rr = d / 2;
+    var cuerpo = M.cylinder(rr, -L, M.segFor(rr));
+    if (!cuerpo) { ctx.err('Diámetro no válido.'); return; }
+    piezas.push(cuerpo);
+    if (!pasante) {
+      /* punta de broca a 118°, como una broca de verdad */
+      var hPunta = rr / Math.tan(59 * Math.PI / 180);
+      var punta = M.cone(rr, -hPunta, M.segFor(rr));
+      if (punta) piezas.push(punta.clone().transform(G3.mTrans(0, 0, -L)));
+    }
+    var tk = tipo && tipo.kw;
+    if (tk === 'A') {
+      var rAv = d;            /* avellanado a 90° */
+      var cs = M.cylinder(rAv, -(rAv - rr), M.segFor(rAv), rr);
+      if (cs) piezas.push(cs);
+    } else if (tk === 'C') {
+      var rCaja = d * 0.85, hCaja = d * 0.6;
+      var cb = M.cylinder(rCaja, -hCaja, M.segFor(rCaja));
+      if (cb) piezas.push(cb);
+    }
+    var herr = piezas[0].clone();
+    for (var i = 1; i < piezas.length; i++) herr = CSG.union(herr, piezas[i]);
+    /* un pelín por fuera, para que la boca corte limpia */
+    herr = herr.clone().transform(G3.mTrans(0, 0, 0.001));
+
+    ctx.doc.mark('TALADRO');
+    var nombre = 'Taladro Ø' + G.fmt(d, 3) + (pasante ? ' pasante' : ' × ' + G.fmt(prof, 3)) +
+                 (tk === 'A' ? ' avellanado' : tk === 'C' ? ' con caja' : '') +
+                 (rosca && rosca.kw === 'S' ? '  M' + G.fmt(d, 2) : '');
+    var nodo = { hist: { op: 'mesh',
+                         verts: herr.verts.map(function (q) { return { x: q.x, y: q.y, z: q.z }; }),
+                         faces: herr.faces.map(function (x) { return x.slice(); }) },
+                 m: W.matrixAt(plCara, cen), nombre: nombre };
+    var e2 = S.solid({ op: 'bool', kind: 'diff', nodes: [S.nodeOf(ent), nodo] },
+                     { layer: ent.layer, color: ent.color });
+    var res = S.meshOf(e2);
+    if (!res || !res.faces.length) { ctx.doc.discardTx(); ctx.err('El taladro deja la pieza vacía.'); return; }
+    ctx.doc.remove(ent);
+    addSolid(ctx, e2);
+    ctx.app.selSet = [e2];
+    ctx.out(nombre + '   volumen de la pieza ' + G.fmt(Math.abs(res.volume()), 3) +
+            (rosca && rosca.kw === 'S' ? '   (rosca M' + G.fmt(d, 2) +
+             ', paso normal ' + G.fmt(pasoMetrico(d), 2) + ' mm)' : ''));
+  });
+
+  /* Paso normal de una rosca métrica ISO */
+  function pasoMetrico(d) {
+    var t = [[1.6,0.35],[2,0.4],[2.5,0.45],[3,0.5],[4,0.7],[5,0.8],[6,1],[8,1.25],[10,1.5],
+             [12,1.75],[14,2],[16,2],[20,2.5],[24,3],[30,3.5],[36,4],[42,4.5],[48,5]];
+    var best = t[0];
+    for (var i = 0; i < t.length; i++) if (Math.abs(t[i][0] - d) < Math.abs(best[0] - d)) best = t[i];
+    return best[1];
+  }
+
+  /* ============================================================
+     SALIENTE — material añadido sobre una cara (extruded boss)
+     ============================================================ */
+  Cmd.add(['SALIENTE', 'BOSS', 'RESALTE'],
+  { group: '3d', icon: 'presspull', title: 'Saliente sobre una cara' },
+  async function (ctx) {
+    var W = CAD.WPlane;
+    var r = await ctx.getEntity('Designe la cara donde nace el saliente', {
+      filter: function (x) { return S.is3D(x); }
+    });
+    if (!r || !r.ent) return;
+    var ent = r.ent, mesh = S.meshOf(ent);
+    if (!mesh) return;
+    var fi = caraSenalada(ctx, ent, mesh, r);
+    if (fi === null) { ctx.err('No se ha podido determinar la cara.'); return; }
+    var reg = mesh.planarRegion(fi);
+    var f = mesh.faces[fi];
+    var plCara = W.fromNormal(mesh.faceCenter(f), reg.n, G3.sub(mesh.verts[f[1]], mesh.verts[f[0]]));
+    var previo = W.get(ctx.doc);
+    W.set(ctx.doc, plCara);
+    ctx.app.refresh();
+
+    var forma, centro, a, b2, h, rr;
+    try {
+      forma = await ctx.getKeyword('Forma del saliente', ['Cilíndrico', 'Rectangular'], { def: 'Cilíndrico' });
+      if (!forma) return;
+      centro = await ctx.getPoint('Precise el centro'); if (!pt(centro)) return;
+      if (forma.kw === 'C') {
+        rr = await ctx.getDist('Precise el radio', { base: centro });
+        if (!num(rr) || rr <= 0) return;
+      } else {
+        a = await ctx.getDist('Precise la longitud', { base: centro }); if (!num(a) || a <= 0) return;
+        b2 = await ctx.getDist('Precise la anchura', { base: centro }); if (!num(b2) || b2 <= 0) return;
+      }
+      h = await ctx.getDist('Precise la altura', { base: centro });
+      if (!num(h) || h <= 0) return;
+    } finally { W.set(ctx.doc, previo); }
+
+    var body = forma.kw === 'C' ? M.cylinder(rr, h, M.segFor(rr)) : M.box(a, b2, h, true);
+    if (!body) { ctx.err('Medidas no válidas.'); return; }
+    if (forma.kw !== 'C') body = body.clone().transform(G3.mTrans(0, 0, h / 2));
+    /* se mete un pelín dentro para que la unión no deje cara a cara */
+    body = body.clone().transform(G3.mTrans(0, 0, -0.001));
+
+    ctx.doc.mark('SALIENTE');
+    var nombre = 'Saliente ' + (forma.kw === 'C' ? 'Ø' + G.fmt(rr * 2, 3) : G.fmt(a, 3) + '×' + G.fmt(b2, 3)) +
+                 ' × ' + G.fmt(h, 3);
+    var nodo = { hist: { op: 'mesh',
+                         verts: body.verts.map(function (q) { return { x: q.x, y: q.y, z: q.z }; }),
+                         faces: body.faces.map(function (x) { return x.slice(); }) },
+                 m: W.matrixAt(plCara, v3(centro.x, centro.y, centro.z || 0)), nombre: nombre };
+    var e2 = S.solid({ op: 'bool', kind: 'union', nodes: [S.nodeOf(ent), nodo] },
+                     { layer: ent.layer, color: ent.color });
+    var res = S.meshOf(e2);
+    if (!res || !res.faces.length) { ctx.doc.discardTx(); ctx.err('No se ha podido unir el saliente.'); return; }
+    ctx.doc.remove(ent);
+    addSolid(ctx, e2);
+    ctx.app.selSet = [e2];
+    ctx.out(nombre + '   volumen de la pieza ' + G.fmt(Math.abs(res.volume()), 3));
+  });
+
 })();
