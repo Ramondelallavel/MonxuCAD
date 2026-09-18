@@ -122,6 +122,7 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     order: '<path d="M3 6h12M3 12h8M3 18h12"/><path d="M19 4v16M16 17l3 3 3-3"/>',
     find: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
+    tree: '<path d="M5 4v14M5 8h6M5 13h6M5 18h6"/><rect x="11" y="5" width="8" height="5" rx="1"/><rect x="11" y="15" width="8" height="5" rx="1"/>',
     mesh: '<path d="M3 8h18M3 16h18M8 3v18M16 3v18"/><rect x="3" y="3" width="18" height="18" rx="1"/>',
     surf: '<path d="M3 15c4-6 8-6 9-3s5 3 9-3"/><path d="M3 20c4-6 8-6 9-3s5 3 9-3"/><path d="M3 15v5M21 9v5M12 12v5"/>',
     dimrad: '<circle cx="11" cy="13" r="7"/><path d="M11 13 20 4"/><path d="M17 4h3v3"/>',
@@ -389,7 +390,8 @@
             [{ cmd: 'DESPLAZA3D', title: 'Desplazar' }, { cmd: 'GIRA3D', title: 'Girar' }, { cmd: 'SIMETRIA3D', title: 'Simetría' }],
             [{ cmd: 'MATRIZ3D', title: 'Matriz' }, { cmd: 'ALINEAR3D', title: 'Alinear' }, { cmd: 'ENGROSAR' }],
             [{ cmd: 'SECCION3D', title: 'Sección' }, { cmd: 'SOLPERFIL', title: 'Perfil plano' }, { cmd: 'SUAVIZARMALLA', title: 'Suavizar' }],
-            [{ cmd: 'PROPFIS', title: 'Prop. físicas' }, { cmd: 'COMPROBARSOLIDO', title: 'Comprobar' }, { cmd: 'FACETRES', title: 'Resolución' }],
+            [{ cmd: 'ARBOL', icon: 'tree', title: 'Árbol de operaciones' }, { cmd: 'PROPFIS', title: 'Prop. físicas' }, { cmd: 'COMPROBARSOLIDO', title: 'Comprobar' }],
+            [{ cmd: 'FACETRES', title: 'Resolución' }],
             [{ cmd: 'CONVERTIRENSOLIDO', title: 'A sólido' }, { cmd: 'CONVERTIRENMALLA', title: 'A malla' }]
           ]
         },
@@ -2178,6 +2180,132 @@
   };
 
   /* ------------------------------------------------------------
+     Árbol de operaciones
+
+     Es la pieza que hace paramétrico el modelado: lista las piezas del
+     documento y, dentro de cada una, el árbol de operaciones con sus
+     medidas.  Cambiar una medida reconstruye el sólido; se puede
+     suprimir y restituir una operación sin perderla.
+     ------------------------------------------------------------ */
+  UI.prototype.renderTree = function () {
+    var p = this.el.palettes;
+    if (!p.classList.contains('open')) return;
+    var self = this, app = this.app, doc = app.doc;
+    var S = CAD.Solid;
+    var piezas = (doc.visible ? doc.visible() : doc.entities).filter(function (e) { return S.is3D(e); });
+    var head = '<div class="palette"><div class="palette-head"><span>Árbol de operaciones</span>' +
+      '<button id="palClose" title="Cerrar" aria-label="Cerrar paleta">✕</button></div><div class="palette-body tree-body">';
+    var html = head;
+    if (!piezas.length) {
+      html += '<div class="prop-empty">El documento no tiene sólidos.<br><br>' +
+              'Cree uno con PRISMARECT, CILINDRO, EXTRUSION, REVOLUCION…</div>';
+    } else {
+      piezas.forEach(function (ent, ip) {
+        var mesh = S.meshOf(ent);
+        var sel = app.selSet.indexOf(ent) >= 0;
+        var vol = mesh ? Math.abs(mesh.volume()) : 0;
+        html += '<div class="tree-part' + (sel ? ' sel' : '') + '" data-part="' + ip + '">';
+        html += '<div class="tree-part-head" data-pick="' + ip + '">' +
+                '<span class="tree-ico">◧</span><b>' + esc(S.opName(ent.hist)) + ' ' + (ip + 1) + '</b>' +
+                '<span class="tree-vol">' + G.fmt(vol, 2) + ' mm³</span></div>';
+        var nodos = S.featureTree(ent);
+        nodos.forEach(function (n, ix) {
+          if (!n.ruta.length && nodos.length > 1) return;      /* la raíz ya es la cabecera */
+          var sup = nodeSuppressed(ent, n.ruta);
+          html += '<div class="tree-node' + (sup ? ' sup' : '') + '" style="padding-left:' +
+                  (10 + n.nivel * 14) + 'px" data-part="' + ip + '" data-ruta="' + n.ruta.join('.') + '">';
+          html += '<span class="tree-tog" title="Suprimir o restituir">' + (sup ? '○' : '●') + '</span>';
+          html += '<span class="tree-name">' + esc(n.nombre) + '</span>';
+          if (n.params.length) {
+            html += '<div class="tree-params">';
+            n.params.forEach(function (q) {
+              html += '<label>' + esc(q.label) +
+                '<input type="number" step="any" value="' + G.fmt(q.value, 4) +
+                '" data-part="' + ip + '" data-ruta="' + n.ruta.join('.') + '" data-key="' + q.key + '"></label>';
+            });
+            html += '</div>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+    }
+    html += '</div></div>';
+    p.innerHTML = html;
+
+    function nodeSuppressed(ent, ruta) {
+      if (!ruta.length) return false;
+      var padre = ent.hist;
+      for (var i = 0; i < ruta.length - 1; i++) {
+        if (!padre || padre.op !== 'bool') return false;
+        padre = padre.nodes[ruta[i]].hist;
+      }
+      if (!padre || padre.op !== 'bool' || !padre.nodes) return false;
+      return !!padre.nodes[ruta[ruta.length - 1]].suprimido;
+    }
+    function piezaDe(i) { return piezas[+i]; }
+
+    var close = p.querySelector('#palClose');
+    if (close) close.addEventListener('click', function () { self.togglePalette('arbol', false); });
+
+    /* designar la pieza al pulsar su cabecera */
+    p.querySelectorAll('[data-pick]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var e = piezaDe(el.dataset.pick);
+        if (!e) return;
+        app.selSet = [e];
+        app.v3dDirty && app.v3dDirty();
+        app.refresh();
+        self.renderTree();
+      });
+    });
+
+    /* suprimir o restituir una operación */
+    p.querySelectorAll('.tree-tog').forEach(function (el) {
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var nd = el.closest('.tree-node');
+        var e = piezaDe(nd.dataset.part);
+        if (!e || !nd.dataset.ruta) return;
+        var ruta = nd.dataset.ruta.split('.').filter(function (x) { return x !== ''; }).map(Number);
+        doc.mark('SUPRIMIR OPERACIÓN');
+        CAD.Solid.toggleNode(e, ruta, doc);
+        app.refresh(true);
+        self.renderTree();
+      });
+    });
+
+    /* editar una medida: el sólido se reconstruye al salir del campo */
+    p.querySelectorAll('.tree-params input').forEach(function (inp) {
+      function aplica() {
+        var e = piezaDe(inp.dataset.part);
+        if (!e) return;
+        var v = parseFloat(inp.value);
+        if (!isFinite(v)) return;
+        var ruta = inp.dataset.ruta.split('.').filter(function (x) { return x !== ''; }).map(Number);
+        var antes = CAD.Solid.histAt(e, ruta);
+        if (!antes || antes[inp.dataset.key] === v) return;
+        doc.mark('EDITAR OPERACIÓN');
+        CAD.Solid.setParam(e, ruta, inp.dataset.key, v, doc);
+        var m = CAD.Solid.meshOf(e);
+        if (!m || !m.faces.length) {
+          /* el cambio deja la pieza vacía: se deshace */
+          CAD.Solid.setParam(e, ruta, inp.dataset.key, antes[inp.dataset.key], doc);
+          app.out('Ese valor deja la pieza vacía; se ha conservado el anterior.', 'warn');
+          inp.value = G.fmt(antes[inp.dataset.key], 4);
+        }
+        app.refresh(true);
+        self.renderTree();
+      }
+      inp.addEventListener('change', aplica);
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); aplica(); }
+        e.stopPropagation();
+      });
+    });
+  };
+
+  /* ------------------------------------------------------------
      Paleta de propiedades
      ------------------------------------------------------------ */
   UI.prototype.togglePalette = function (name, show) {
@@ -2187,6 +2315,7 @@
     this.paletteKind = name || 'props';
     p.classList.toggle('open', open);
     if (open && this.paletteKind === 'blocks') this.renderBlocks();
+    else if (open && this.paletteKind === 'arbol') this.renderTree();
     else this.renderProps();
     var app = this.app;
     setTimeout(function () { app.resize(); }, 10);
@@ -2203,6 +2332,7 @@
     var p = this.el.palettes;
     if (!p.classList.contains('open')) return;
     if (this.paletteKind === 'blocks') return;
+    if (this.paletteKind === 'arbol') { this.renderTree(); return; }
     var self = this, app = this.app, doc = app.doc;
     var sel = app.selSet;
     var head = '<div class="palette"><div class="palette-head"><span>Propiedades</span>' +

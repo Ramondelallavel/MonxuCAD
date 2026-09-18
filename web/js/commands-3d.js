@@ -535,18 +535,18 @@
       if (mode !== 'diff' && sel.length < 2) { ctx.err('Se necesitan al menos dos sólidos.'); return; }
       ctx.doc.mark(label);
       var t0 = performance.now();
-      var res, i;
-      try {
-        if (mode === 'diff') {
-          res = S.meshOf(sel.a[0]).clone();
-          for (i = 1; i < sel.a.length; i++) res = CSG.union(res, S.meshOf(sel.a[i]));
-          for (i = 0; i < sel.b.length; i++) res = CSG.subtract(res, S.meshOf(sel.b[i]));
-        } else {
-          res = S.meshOf(sel[0]).clone();
-          for (i = 1; i < sel.length; i++)
-            res = mode === 'union' ? CSG.union(res, S.meshOf(sel[i])) : CSG.intersect(res, S.meshOf(sel[i]));
-        }
-      } catch (err) {
+      var all = mode === 'diff' ? sel.a.concat(sel.b) : sel;
+      var first = mode === 'diff' ? sel.a[0] : sel[0];
+
+      /* El resultado guarda el árbol de operandos, no una malla cocida:
+         así se puede volver atrás, cambiar el radio de un taladro o
+         suprimir una operación y que la pieza se reconstruya sola. */
+      var e = S.solid({ op: 'bool', kind: mode,
+                        nodes: all.map(function (x) { return S.nodeOf(x); }) },
+                      { layer: first.layer, color: first.color });
+      var res;
+      try { res = S.meshOf(e); }
+      catch (err) {
         ctx.doc.discardTx();
         ctx.err('Error en la operación booleana: ' + err.message);
         return;
@@ -556,9 +556,6 @@
         ctx.err('El resultado está vacío (los sólidos no se cortan).');
         return;
       }
-      var first = mode === 'diff' ? sel.a[0] : sel[0];
-      var e = S.fromMesh(res, { layer: first.layer, color: first.color });
-      var all = mode === 'diff' ? sel.a.concat(sel.b) : sel;
       all.forEach(function (x) { ctx.doc.remove(x); });
       addSolid(ctx, e);
       ctx.app.selSet = [e];
@@ -605,7 +602,7 @@
     var sel = await get3D(ctx, 'Designe objetos a cortar');
     if (!sel) return;
     var k = await ctx.getKeyword('Precise punto inicial del plano de corte o',
-      ['3puntos', 'Objeto', 'Eje z', 'Vista', 'XY', 'YZ', 'ZX'], '3');
+      ['3puntos', 'Objeto', 'Eje z', 'Vista', 'XY', 'YZ', 'ZX'], { def: '3puntos' });
     var kw = k && k.kw;
     var plane = null;
     if (kw === 'XY') plane = { n: v3(0, 0, 1), w: 0 };
@@ -1086,4 +1083,14 @@
     ctx.app.refresh(true);
     ctx.out(sel.length + ' sólido(s) convertido(s) en malla.');
   });
+
+  /* Panel del árbol de operaciones */
+  Cmd.add(['ARBOL', 'FEATURETREE', 'HISTORIAL', 'ARBOLOP'],
+  { group: '3d', icon: 'tree', title: 'Árbol de operaciones', transparent: true },
+  async function (ctx) {
+    ctx.app.ui.togglePalette('arbol', true);
+    ctx.out('Árbol de operaciones: cambie una medida y la pieza se reconstruye; ' +
+            'el círculo de la izquierda suprime o restituye la operación.');
+  });
+
 })();

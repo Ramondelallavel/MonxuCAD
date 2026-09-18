@@ -47,8 +47,142 @@
       case 'sweep':    return M.sweep(pts(h.prof), pts(h.path), h.opts || {});
       case 'loft':     return M.loft((h.secs || []).map(pts), h.opts || {});
       case 'mesh':     return M.make(pts(h.verts), h.faces.map(function (f) { return f.slice(); }));
+      case 'bool':     return evalBool(h);
       default:         return ent.mesh ? M.make(pts(ent.mesh.verts), ent.mesh.faces) : null;
     }
+  };
+
+  /* ------------------------------------------------------------------
+     Operación booleana con historial.  Cada operando conserva su propia
+     historia y su matriz, de modo que el árbol se puede recorrer y
+     reconstruir cambiando un parámetro, como en SolidWorks o CATIA.
+     Antes el resultado se cocía en una malla y los parámetros de las
+     piezas que lo formaban se perdían para siempre.
+     ------------------------------------------------------------------ */
+  function evalBool(h) {
+    var CSG = CAD.CSG;
+    var nodos = h.nodes || [];
+    var acc = null;
+    for (var i = 0; i < nodos.length; i++) {
+      var nd = nodos[i];
+      if (nd.suprimido) continue;                /* operación suprimida */
+      var m = S.evaluate({ hist: nd.hist, mesh: nd.mesh });
+      if (!m) continue;
+      if (nd.m) { m = m.clone(); m.transform(nd.m); }
+      if (!acc) { acc = m.clone(); continue; }
+      try {
+        if (h.kind === 'union') acc = CSG.union(acc, m);
+        else if (h.kind === 'inter') acc = CSG.intersect(acc, m);
+        else acc = CSG.subtract(acc, m);
+      } catch (e) { return acc; }
+      if (!acc || !acc.faces.length) return acc;
+    }
+    return acc;
+  }
+
+  /* Nodo de árbol a partir de una entidad 3D */
+  S.nodeOf = function (ent) {
+    var nd = { hist: ent.hist ? JSON.parse(JSON.stringify(ent.hist)) : null,
+               m: ent.m ? ent.m.slice() : null,
+               nombre: S.opName(ent.hist) };
+    if (!nd.hist && ent.mesh) nd.mesh = ent.mesh;
+    return nd;
+  };
+
+  var OPNAMES = {
+    box: 'Prisma', cylinder: 'Cilindro', cone: 'Cono', sphere: 'Esfera',
+    torus: 'Toroide', wedge: 'Cuña', pyramid: 'Pirámide',
+    extrude: 'Extrusión', revolve: 'Revolución', sweep: 'Barrido',
+    loft: 'Solevado', mesh: 'Malla', bool: 'Operación booleana'
+  };
+  var BOOLNAMES = { union: 'Unión', diff: 'Diferencia', inter: 'Intersección' };
+  S.opName = function (h) {
+    if (!h) return 'Malla';
+    if (h.op === 'bool') return BOOLNAMES[h.kind] || 'Booleana';
+    return OPNAMES[h.op] || h.op;
+  };
+
+  /* Parámetros editables de una operación, con su rótulo y unidad */
+  var PARAMS = {
+    box: [['l', 'Longitud'], ['w', 'Anchura'], ['h', 'Altura']],
+    wedge: [['l', 'Longitud'], ['w', 'Anchura'], ['h', 'Altura']],
+    cylinder: [['r', 'Radio'], ['h', 'Altura'], ['r2', 'Radio superior']],
+    cone: [['r', 'Radio'], ['h', 'Altura'], ['r2', 'Radio superior']],
+    sphere: [['r', 'Radio']],
+    torus: [['R', 'Radio mayor'], ['r', 'Radio del tubo']],
+    pyramid: [['r', 'Radio'], ['h', 'Altura'], ['sides', 'Lados'], ['r2', 'Radio superior']],
+    revolve: [['angle', 'Ángulo'], ['seg', 'Segmentos']],
+    extrude: [['taper', 'Conicidad']]
+  };
+  S.paramsOf = function (h) {
+    if (!h) return [];
+    var def = PARAMS[h.op] || [];
+    var out = [];
+    for (var i = 0; i < def.length; i++) {
+      var k = def[i][0];
+      if (h[k] === undefined || typeof h[k] !== 'number') continue;
+      out.push({ key: k, label: def[i][1], value: h[k] });
+    }
+    return out;
+  };
+
+  /* --------- Recorrido del árbol ---------
+     Devuelve una lista plana [{nivel, nombre, hist, params, ruta}] donde
+     "ruta" es la sucesión de índices para llegar al nodo. */
+  S.featureTree = function (ent) {
+    var out = [];
+    function rec(h, nivel, ruta, etiq) {
+      if (!h) return;
+      out.push({ nivel: nivel, nombre: etiq || S.opName(h), op: h.op,
+                 kind: h.kind, params: S.paramsOf(h), ruta: ruta.slice() });
+      if (h.op === 'bool' && h.nodes) {
+        for (var i = 0; i < h.nodes.length; i++) {
+          var nd = h.nodes[i];
+          var pref = (h.kind === 'diff' && i > 0) ? 'Resta: ' : '';
+          rec(nd.hist, nivel + 1, ruta.concat(i), pref + (nd.nombre || S.opName(nd.hist)));
+        }
+      }
+    }
+    rec(ent.hist, 0, [], null);
+    return out;
+  };
+
+  /* Historia que hay al final de una ruta de índices */
+  S.histAt = function (ent, ruta) {
+    var h = ent.hist;
+    for (var i = 0; i < ruta.length; i++) {
+      if (!h || h.op !== 'bool' || !h.nodes || !h.nodes[ruta[i]]) return null;
+      h = h.nodes[ruta[i]].hist;
+    }
+    return h;
+  };
+
+  /* Cambia un parámetro dentro del árbol y fuerza la reconstrucción */
+  S.setParam = function (ent, ruta, key, value, doc) {
+    var h = S.histAt(ent, ruta);
+    if (!h || typeof value !== 'number' || !isFinite(value)) return false;
+    h[key] = value;
+    if (doc && doc.touch) doc.touch(ent);
+    ent.sig = newSig();
+    CACHE.delete(ent);
+    return true;
+  };
+
+  /* Suprime o restituye un operando (como en el árbol de SolidWorks) */
+  S.toggleNode = function (ent, ruta, doc) {
+    if (!ruta.length) return false;
+    var padre = ent.hist;
+    for (var i = 0; i < ruta.length - 1; i++) {
+      if (!padre || padre.op !== 'bool') return false;
+      padre = padre.nodes[ruta[i]].hist;
+    }
+    if (!padre || padre.op !== 'bool' || !padre.nodes) return false;
+    var nd = padre.nodes[ruta[ruta.length - 1]];
+    nd.suprimido = !nd.suprimido;
+    if (doc && doc.touch) doc.touch(ent);
+    ent.sig = newSig();
+    CACHE.delete(ent);
+    return nd.suprimido;
   };
   function pts(a) { return (a || []).map(function (p) { return v3(p.x, p.y, p.z || 0); }); }
   function vec(p) { return p ? v3(p.x, p.y, p.z || 0) : v3(0, 0, 0); }
