@@ -725,7 +725,7 @@
   };
 
   /* Revolución de un perfil (abierto o cerrado) alrededor de un eje */
-  M.revolve = function (prof, axisPt, axisDir, angle, seg, closedProfile) {
+  M.revolve = function (prof, axisPt, axisDir, angle, seg, closedProfile, noCaps) {
     if (!prof || prof.length < 2) return null;
     /* Un eje nulo o un ángulo nulo no generan sólido: antes salía una
        malla degenerada de volumen cero en lugar de un aviso. */
@@ -754,7 +754,7 @@
         var j2 = (j + 1) % np;
         mesh.faces.push([id(i, j), id(i, j2), id(i + 1, j2), id(i + 1, j)]);
       }
-    if (!full) {
+    if (!full && !noCaps) {
       /* tapas planas en los extremos */
       var f0 = [], f1 = [];
       for (j = 0; j < np; j++) { f0.push(id(0, j)); f1.push(id(rings.length - 1, j)); }
@@ -778,7 +778,7 @@
     }
     /* si el perfil es abierto y la revolución es completa, se cierra la
        superficie contra el eje para obtener un sólido */
-    if (full && !closedProfile) {
+    if (full && !closedProfile && !noCaps) {
       var p0 = prof[0], pN = prof[np - 1];
       var d0 = G3.distToSeg(p0, axisPt, G3.add(axisPt, ad));
       var dN = G3.distToSeg(pN, axisPt, G3.add(axisPt, ad));
@@ -915,7 +915,8 @@
       n = us.length;
       R = secs.map(function (s) { return sampleAt(s, us, closed); });
     }
-    if (n < 3) return null;
+    /* una sección abierta puede tener sólo dos puntos (superficie reglada) */
+    if (n < (closed ? 3 : 2)) return null;
     /* alineación por rotación del índice de arranque */
     for (var i = 1; i < R.length; i++) R[i] = alignStart(R[i - 1], R[i], closed);
     var mesh = new Mesh([], []), j;

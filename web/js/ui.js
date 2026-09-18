@@ -121,6 +121,10 @@
     audit: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13l2 2 4-4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     order: '<path d="M3 6h12M3 12h8M3 18h12"/><path d="M19 4v16M16 17l3 3 3-3"/>',
+    find: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
+    mesh: '<path d="M3 8h18M3 16h18M8 3v18M16 3v18"/><rect x="3" y="3" width="18" height="18" rx="1"/>',
+    surf: '<path d="M3 15c4-6 8-6 9-3s5 3 9-3"/><path d="M3 20c4-6 8-6 9-3s5 3 9-3"/><path d="M3 15v5M21 9v5M12 12v5"/>',
+    dimrad: '<circle cx="11" cy="13" r="7"/><path d="M11 13 20 4"/><path d="M17 4h3v3"/>',
     gradient: '<rect x="4" y="5" width="16" height="14"/><path d="M4 9h16M4 12h16M4 15h16" opacity=".5"/>',
     cycle: '<rect x="3" y="5" width="11" height="9"/><rect x="8" y="10" width="11" height="9"/><path d="M17 3l3 3-3 3" opacity=".7"/>',
     wipeout: '<rect x="3" y="6" width="18" height="12" stroke-dasharray="3 2"/><path d="M6 15l5-6 4 4 3-3" opacity=".45"/><rect x="7" y="9" width="10" height="6" fill="currentColor" stroke="none" opacity=".9"/>',
@@ -291,7 +295,7 @@
     },
     {
       id: 'anotar', label: 'Anotar', panels: [
-        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }, { cmd: 'ESCALATEXTO', icon: 'scale', title: 'Escalar' }, { cmd: 'JUSTIFICATEXTO', icon: 'align', title: 'Justificar' }]] },
+        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }, { cmd: 'ESCALATEXTO', icon: 'scale', title: 'Escalar' }, { cmd: 'JUSTIFICATEXTO', icon: 'align', title: 'Justificar' }], [{ cmd: 'BUSCAR', icon: 'find', title: 'Buscar' }, { cmd: 'TEXTOALFRENTE', icon: 'order', title: 'Al frente' }]] },
         { label: 'Tablas', groups: [[{ cmd: 'TABLA', big: true }]] },
         {
           label: 'Cotas', groups: [
@@ -303,7 +307,7 @@
           ]
         },
         { label: 'Directrices', groups: [[{ cmd: 'DIRECTRIZ', big: true }]] },
-        { label: 'Edición', groups: [[{ cmd: 'ACOTARAPIDA', big: true, title: 'Cota rápida' }], [{ cmd: 'MARCACENTRO', big: true, title: 'M. centro' }], [{ cmd: 'ACOTAEDIC', icon: 'dimstyle', title: 'Editar cota' }, { cmd: 'ACOTATEDIC', icon: 'dimstyle', title: 'Mover texto' }]] },
+        { label: 'Edición', groups: [[{ cmd: 'ACOTARAPIDA', big: true, title: 'Cota rápida' }], [{ cmd: 'MARCACENTRO', big: true, title: 'M. centro' }], [{ cmd: 'ACOTAEDIC', icon: 'dimstyle', title: 'Editar cota' }, { cmd: 'ACOTATEDIC', icon: 'dimstyle', title: 'Mover texto' }, { cmd: 'ACOTASALTO', icon: 'dimrad', title: 'Salto' }]] },
         { label: 'Estilos', groups: [[{ cmd: 'ESTILOCOTA', big: true, title: 'Estilo cota' }], [{ cmd: 'ESTILO', big: true, title: 'Estilo texto' }], [{ cmd: 'ACTCOTA', title: 'Actualizar' }]] }
       ]
     },
@@ -316,7 +320,7 @@
             [{ cmd: 'ZOOM V', icon: 'zoomwin', title: 'Ventana' }, { cmd: 'ZOOM P', icon: 'zoomprev', title: 'Previo' }, { cmd: 'ZOOM T', icon: 'zoom', title: 'Todo' }]
           ]
         },
-        { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }]] },
+        { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }], [{ cmd: 'RECORRERCAPAS', icon: 'layer', title: 'Recorrer capas' }]] },
         { label: 'Coordenadas', groups: [[{ cmd: 'SCP', big: true }], [{ cmd: 'SCPGLOBAL', icon: 'ucs', title: 'SCP global' }, { cmd: 'VISTA', title: 'Vistas' }]] },
         { label: 'Visibilidad', groups: [[{ cmd: 'AISLAROBJETOS', big: true, title: 'Aislar' }], [{ cmd: 'OCULTAROBJETOS', big: true, icon: 'view', title: 'Ocultar' }], [{ cmd: 'FINAISLAR', icon: 'view', title: 'Mostrar todo' }]] },
         { label: 'Interfaz', groups: [[{ cmd: 'LIMPIAPANTALLA', title: 'Pantalla limpia' }, { cmd: 'REGEN' }, { cmd: 'OPCIONES' }]] }
@@ -363,6 +367,14 @@
             [{ cmd: 'EXTRUSION', big: true }],
             [{ cmd: 'REVOLUCION', big: true }],
             [{ cmd: 'BARRIDO' }, { cmd: 'SOLEVADO' }, { cmd: 'PULSARTIRAR', title: 'Pulsar/tirar' }]
+          ]
+        },
+        {
+          label: 'Superficies y mallas', groups: [
+            [{ cmd: 'SUPERFICIEREGLA', big: true, title: 'Reglada' }],
+            [{ cmd: 'SUPERFICIEARISTA', big: true, title: 'De arista' }],
+            [{ cmd: 'SUPERFICIETAB', title: 'Tabulada' }, { cmd: 'SUPERFICIEREVOL', title: 'De revolución' }, { cmd: 'SUPERFICIEPLANA', title: 'Plana' }],
+            [{ cmd: 'MALLA', title: 'Primitiva de malla' }, { cmd: 'APLANAROBJETOS', title: 'Aplanar' }, { cmd: 'VISTAS2D', title: 'Tres vistas' }]
           ]
         },
         {
