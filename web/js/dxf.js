@@ -155,6 +155,7 @@
            lo que AutoCAD lee sin ningún complemento. */
         var mesh = CAD.Solid && CAD.Solid.meshOf(ent);
         if (!mesh || !mesh.faces.length) break;
+        try { mesh = mesh.triangulated(1e-5); } catch (err) { }
         W.polyface(mesh, ent, doc, owner);
         break;
       }

@@ -18,13 +18,16 @@
   X.n6 = n6;
 
   /* Reúne las mallas seleccionadas en una sola, con sus colores */
-  X.collect = function (ents, doc, app) {
+  X.collect = function (ents, doc, app, raw) {
     var parts = [];
     for (var i = 0; i < ents.length; i++) {
       var e = ents[i];
       if (!S.is3D(e)) continue;
       var m = S.meshOf(e);
       if (!m || !m.faces.length) continue;
+      /* para exportar se usa la malla triangulada y reparada: los
+         formatos de fabricación exigen una superficie cerrada */
+      if (!raw) { try { m = m.triangulated(1e-5); } catch (err) { } }
       var hex = app && app.r && app.r.colorOf ? app.r.colorOf(e, doc) : '#cccccc';
       parts.push({ mesh: m, ent: e, color: hex, name: (e.name || (e.type + '_' + e.id)) });
     }

@@ -300,8 +300,25 @@
      booleanos (por ejemplo antes de exportar). */
   CSG.post = function (mesh, noMerge) {
     mesh.clean();
-    if (!noMerge) { CSG.mergeCoplanar(mesh); mesh.clean(); }
+    if (noMerge) { mesh.fixTJunctions(1e-6); return mesh; }
+    /* Se guarda la malla sin fusionar: si la fusión deja aristas
+       compartidas por más de dos caras (no-manifold), se descarta y se
+       devuelve la versión sin fusionar, que siempre sale bien formada.
+       Cuesta más caras, pero la topología es lo que garantiza que el
+       sólido se pueda cortar, imprimir y mecanizar sin sorpresas. */
+    var plain = mesh.clone();
+    CSG.mergeCoplanar(mesh);
+    mesh.clean();
     mesh.fixTJunctions(1e-6);
+    var c = M.check(mesh);
+    if (c.manifold) return mesh;
+    plain.fixTJunctions(1e-6);
+    var c2 = M.check(plain);
+    /* sólo se cambia si la versión sin fusionar es estrictamente mejor */
+    if (c2.noManifold < c.noManifold || (c2.noManifold === c.noManifold && c2.abiertas < c.abiertas)) {
+      mesh.verts = plain.verts;
+      mesh.faces = plain.faces;
+    }
     return mesh;
   };
 
@@ -470,14 +487,104 @@
     return r;
   };
 
-  /* Desfase de malla por desplazamiento de vértices según la normal
-     suavizada.  Válido para formas convexas o suaves; para formas con
-     aristas vivas se re-plantean las caras. */
+  /* Desfase de malla exacto para caras planas.
+     Cada cara define un plano; al desfasarlo una distancia d, el vértice
+     nuevo es la intersección de los planos desfasados de sus caras.  Con
+     tres o más planos independientes la solución es un punto, con dos una
+     recta (se toma el punto más cercano al original) y con uno el simple
+     desplazamiento por la normal.  Así una caja desfasada -3 da una caja
+     exactamente 6 mm menor en cada dirección, cosa que el promedio de
+     normales por vértice no consigue. */
   CSG.offsetMesh = function (mesh, d) {
     var m = mesh.clone();
-    var nrm = m.vertexNormals(180);
-    for (var i = 0; i < m.verts.length; i++)
-      m.verts[i] = G3.add(m.verts[i], G3.mul(nrm[i], d));
+    var nf = m.faces.length, i, j;
+    var nrm = new Array(nf), w = new Array(nf);
+    for (i = 0; i < nf; i++) {
+      nrm[i] = m.faceNormal(m.faces[i]);
+      w[i] = G3.dot(nrm[i], m.verts[m.faces[i][0]]) + d;
+    }
+    /* caras incidentes en cada vértice */
+    var inc = new Array(m.verts.length);
+    for (i = 0; i < nf; i++)
+      for (j = 0; j < m.faces[i].length; j++) {
+        var k = m.faces[i][j];
+        if (!inc[k]) inc[k] = [];
+        if (inc[k].indexOf(i) < 0) inc[k].push(i);
+      }
+    var out = new Array(m.verts.length);
+    for (k = 0; k < m.verts.length; k++) {
+      var p = m.verts[k], list = inc[k] || [];
+      /* planos distintos (se descartan los paralelos repetidos) */
+      var pl = [];
+      for (i = 0; i < list.length; i++) {
+        var n = nrm[list[i]], wi = w[list[i]];
+        var dup = false;
+        for (j = 0; j < pl.length; j++)
+          if (G3.dot(pl[j].n, n) > 0.999995 && Math.abs(pl[j].w - wi) < 1e-9) { dup = true; break; }
+        if (!dup) pl.push({ n: n, w: wi });
+      }
+      out[k] = solvePlanes(pl, p, d);
+    }
+    m.verts = out;
     return m;
   };
+
+  /* Punto que satisface los planos dados; si el sistema es singular se
+     resuelve por mínimos cuadrados amortiguados hacia el punto original. */
+  function solvePlanes(pl, p, d) {
+    if (!pl.length) return G3.copy(p);
+    if (pl.length === 1) return G3.add(p, G3.mul(pl[0].n, d));
+    /* busca tres planos lo más independientes posible */
+    if (pl.length >= 3) {
+      var best = null, bestVol = 1e-6;
+      for (var a = 0; a < pl.length; a++)
+        for (var b = a + 1; b < pl.length; b++)
+          for (var c = b + 1; c < pl.length; c++) {
+            var v = Math.abs(G3.dot(pl[a].n, G3.cross(pl[b].n, pl[c].n)));
+            if (v > bestVol) { bestVol = v; best = [pl[a], pl[b], pl[c]]; }
+          }
+      if (best) {
+        var q = cramer3(best);
+        if (q && G3.dist(q, p) < Math.abs(d) * 12 + 1e-6) return q;
+      }
+    }
+    /* dos planos: el punto de la recta de intersección más cercano a p */
+    var A = pl[0], B = null, bestAng = 0.999995;
+    for (var i = 1; i < pl.length; i++) {
+      var dot = Math.abs(G3.dot(A.n, pl[i].n));
+      if (dot < bestAng) { bestAng = dot; B = pl[i]; }
+    }
+    if (B) {
+      var dir = G3.cross(A.n, B.n);
+      if (G3.len2(dir) > 1e-14) {
+        /* punto base: resuelve el sistema 2x2 en el plano generado por las normales */
+        var n1n2 = G3.dot(A.n, B.n);
+        var det = 1 - n1n2 * n1n2;
+        var c1 = (A.w - B.w * n1n2) / det;
+        var c2 = (B.w - A.w * n1n2) / det;
+        var base = G3.add(G3.mul(A.n, c1), G3.mul(B.n, c2));
+        var t = G3.dot(G3.sub(p, base), dir) / G3.len2(dir);
+        var q2 = G3.add(base, G3.mul(dir, t));
+        if (G3.dist(q2, p) < Math.abs(d) * 12 + 1e-6) return q2;
+      }
+    }
+    /* último recurso: promedio de los desplazamientos por normal */
+    var acc = G3.v(0, 0, 0);
+    for (i = 0; i < pl.length; i++) {
+      var off = pl[i].w - G3.dot(pl[i].n, p);
+      acc = G3.add(acc, G3.mul(pl[i].n, off));
+    }
+    return G3.add(p, G3.mul(acc, 1 / pl.length));
+  }
+
+  function cramer3(pl) {
+    var a = pl[0].n, b = pl[1].n, c = pl[2].n;
+    var det = G3.dot(a, G3.cross(b, c));
+    if (Math.abs(det) < 1e-9) return null;
+    var r = G3.add(G3.add(G3.mul(G3.cross(b, c), pl[0].w),
+                          G3.mul(G3.cross(c, a), pl[1].w)),
+                   G3.mul(G3.cross(a, b), pl[2].w));
+    return G3.mul(r, 1 / det);
+  }
+
 })();

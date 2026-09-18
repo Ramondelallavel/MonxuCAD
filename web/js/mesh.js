@@ -62,7 +62,12 @@
     return v3(c.x / k, c.y / k, c.z / k);
   };
 
-  /* Triángulos: [{a,b,c, n}] con índices al array de vértices */
+  /* Triángulos de toda la malla, con índices al array de vértices.
+     La triangulación puede descartar vértices colineales (los que deja la
+     reparación de uniones en T).  Si se quedan fuera, el triángulo vecino
+     sí los usa y aparece una grieta: la malla deja de ser estanca al
+     exportarla.  Por eso se vuelven a insertar partiendo el triángulo
+     sobre cuya arista caen. */
   Mesh.prototype.triangles = function () {
     var out = [], i, j;
     for (i = 0; i < this.faces.length; i++) {
@@ -72,11 +77,116 @@
       var pts = [];
       for (j = 0; j < f.length; j++) pts.push(this.verts[f[j]]);
       var t = G3.triangulate(pts);
-      if (!t.length) { for (j = 1; j < f.length - 1; j++) out.push([f[0], f[j], f[j + 1]]); continue; }
-      for (j = 0; j < t.length; j++) out.push([f[t[j][0]], f[t[j][1]], f[t[j][2]]]);
+      var tri;
+      if (!t.length) {
+        tri = [];
+        for (j = 1; j < f.length - 1; j++) tri.push([f[0], f[j], f[j + 1]]);
+      } else {
+        tri = [];
+        for (j = 0; j < t.length; j++) tri.push([f[t[j][0]], f[t[j][1]], f[t[j][2]]]);
+      }
+      reinsertDropped(this, f, tri);
+      for (j = 0; j < tri.length; j++) out.push(tri[j]);
     }
     return out;
   };
+
+  /* Reinserta los vértices de la cara que la triangulación descartó.
+     Sólo se parten aristas del CONTORNO del polígono, nunca diagonales
+     interiores: el contorno lo comparte la cara vecina, que hace el mismo
+     corte en el mismo punto, así que la superficie sigue cerrada.  Partir
+     una diagonal interior, en cambio, dejaría un triángulo a un lado y
+     dos medias aristas al otro. */
+  function reinsertDropped(mesh, face, tri) {
+    var n = face.length, i, j;
+    var used = new Set();
+    for (i = 0; i < tri.length; i++)
+      for (j = 0; j < 3; j++) used.add(tri[i][j]);
+    var missing = false;
+    for (i = 0; i < n; i++) if (!used.has(face[i])) { missing = true; break; }
+    if (!missing) return;
+
+    /* se recorre el contorno en orden: cada vértice ausente se inserta
+       en la arista que va del último presente al siguiente presente */
+    for (var pass = 0; pass < n; pass++) {
+      var idx = -1;
+      for (i = 0; i < n; i++) if (!used.has(face[i])) { idx = i; break; }
+      if (idx < 0) break;
+      var vi = face[idx];
+      /* vecinos presentes a un lado y otro del contorno */
+      var a = -1, b = -1;
+      for (i = 1; i < n; i++) {
+        var k = face[(idx - i + n) % n];
+        if (used.has(k)) { a = k; break; }
+      }
+      for (i = 1; i < n; i++) {
+        var k2 = face[(idx + i) % n];
+        if (used.has(k2)) { b = k2; break; }
+      }
+      used.add(vi);                       /* aunque falle, no se reintenta */
+      if (a < 0 || b < 0 || a === b) continue;
+      /* el vértice tiene que caer realmente sobre esa arista */
+      var pa = mesh.verts[a], pb = mesh.verts[b], pv = mesh.verts[vi];
+      var L2 = G3.dist2(pa, pb);
+      if (L2 < 1e-18) continue;
+      var t = G3.dot(G3.sub(pv, pa), G3.sub(pb, pa)) / L2;
+      if (t <= 1e-9 || t >= 1 - 1e-9) continue;
+      if (G3.distToSeg(pv, pa, pb) > Math.sqrt(L2) * 1e-4) continue;
+      /* triángulos que usan esa arista (en el contorno hay exactamente uno) */
+      var hits = [];
+      for (i = 0; i < tri.length; i++) {
+        var T = tri[i];
+        for (j = 0; j < 3; j++) {
+          var x = T[j], y = T[(j + 1) % 3];
+          if ((x === a && y === b) || (x === b && y === a)) { hits.push({ t: i, e: j }); break; }
+        }
+      }
+      if (hits.length !== 1) continue;    /* diagonal interior: no se toca */
+      var h = hits[0], TT = tri[h.t];
+      var i0 = TT[h.e], i1 = TT[(h.e + 1) % 3], i2 = TT[(h.e + 2) % 3];
+      tri[h.t] = [i0, vi, i2];
+      tri.push([vi, i1, i2]);
+    }
+  }
+
+  /* Malla equivalente formada sólo por triángulos, con las uniones en T
+     reparadas sobre los propios triángulos.  Triangular cada cara por
+     separado puede dejar microgrietas entre caras vecinas cuando un
+     vértice queda a una distancia de la arista mayor que la tolerancia;
+     esta pasada las cierra.  Es la malla que se escribe a STL, DXF y
+     demás formatos que exigen una superficie cerrada. */
+  Mesh.prototype.triangulated = function (tol) {
+    tol = tol || 1e-5;
+    var tris = this.triangles();
+    var m = new Mesh(this.verts.map(function (p) { return G3.copy(p); }),
+                     tris.map(function (t) { return t.slice(); }));
+    /* Se sueldan los vértices coincidentes, pero NO se descartan los
+       triángulos muy finos: aunque no aporten área, forman parte de la
+       superficie y quitarlos abre agujeros. */
+    m.weld(tol * 0.1);
+    dropDegenerate(m);
+    if (M.check(m).abiertas) {
+      m.fixTJunctions(tol);
+      m = new Mesh(m.verts, m.triangles().map(function (t) { return t.slice(); }));
+      m.weld(tol * 0.1);
+      dropDegenerate(m);
+    }
+    return m;
+  };
+
+  /* Sólo caras con índices repetidos: esas sí son basura */
+  function dropDegenerate(m) {
+    var keep = [];
+    for (var i = 0; i < m.faces.length; i++) {
+      var f = m.faces[i];
+      if (f.length < 3) continue;
+      var bad = false;
+      for (var j = 0; j < f.length && !bad; j++)
+        for (var k = j + 1; k < f.length; k++) if (f[j] === f[k]) { bad = true; break; }
+      if (!bad) keep.push(f);
+    }
+    m.faces = keep;
+  }
 
   /* Aristas únicas -> [[i,j], ...] con las caras adyacentes */
   Mesh.prototype.edges = function () {
@@ -951,6 +1061,12 @@
   };
 
   /* Comprobación de estanqueidad: toda arista debe tener 2 caras */
+  /* Diagnóstico de la malla.
+       estanco  : ninguna arista libre -> la superficie cierra un volumen.
+                  Es la condición que exigen los laminadores y el CAM.
+       manifold : además ninguna arista con más de dos caras.  Una malla
+                  estanca pero no manifold sigue siendo utilizable; sólo
+                  significa que en alguna arista concurren tres caras. */
   M.check = function (mesh) {
     var ed = mesh.edges(), open = 0, nonMan = 0;
     for (var i = 0; i < ed.length; i++) {
@@ -958,7 +1074,8 @@
       else if (ed[i].f.length > 2) nonMan++;
     }
     return { aristas: ed.length, abiertas: open, noManifold: nonMan,
-             estanco: open === 0 && nonMan === 0,
+             estanco: open === 0,
+             manifold: open === 0 && nonMan === 0,
              caras: mesh.faces.length, vertices: mesh.verts.length };
   };
 })();

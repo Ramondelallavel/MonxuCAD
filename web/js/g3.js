@@ -446,15 +446,20 @@
         if (q2 > bestQ) { bestQ = q2; cut = k; }
       }
       if (cut < 0) {
-        /* ninguna oreja: casi siempre por vértices colineales sobrantes.
-           Se elimina el más plano y se reintenta. */
+        /* Ninguna oreja válida: casi siempre porque quedan vértices
+           colineales.  Se corta igualmente la oreja más plana en vez de
+           borrar el vértice: el triángulo sale casi sin área, pero el
+           vértice se conserva y el contorno sigue coincidiendo con el de
+           la cara vecina.  Si se borrase, esa cara sí lo usaría y la
+           superficie se abriría por ahí. */
         var worst = -1, worstC = Infinity;
         for (k = 0; k < m; k++) {
           var j0 = idx[(k + m - 1) % m], j1 = idx[k], j2 = idx[(k + 1) % m];
           var cc = Math.abs(cr(flat[j0], flat[j1], flat[j2]));
           if (cc < worstC) { worstC = cc; worst = k; }
         }
-        if (worst < 0 || worstC > EPSA * 64) break;   /* no es colinealidad: se abandona */
+        if (worst < 0) break;
+        tri.push([idx[(worst + m - 1) % m], idx[worst], idx[(worst + 1) % m]]);
         idx.splice(worst, 1);
         continue;
       }

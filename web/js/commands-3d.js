@@ -454,7 +454,7 @@
       var chk = M.check(res);
       ctx.out(label + ': volumen ' + G.fmt(Math.abs(res.volume()), 4) +
               ', ' + res.faces.length + ' caras, ' + Math.round(performance.now() - t0) + ' ms' +
-              (chk.estanco ? '' : '  (aviso: malla no estanca)'));
+              (chk.estanco ? '' : '  (aviso: la malla queda abierta)'));
     });
   }
   boolCmd(['UNION3D', 'UNION3'], { group: '3d', icon: 'union', title: 'Unión de sólidos' }, 'union', 'Unión');
@@ -655,10 +655,10 @@
       var mesh = S.meshOf(sel[i]);
       if (!mesh) continue;
       var c = M.check(mesh);
+      var est = c.estanco ? 'estanco ✓' : 'ABIERTO (' + c.abiertas + ' aristas libres)';
+      var man = c.noManifold ? ',  ' + c.noManifold + ' arista(s) con más de dos caras' : '';
       ctx.out('Sólido ' + sel[i].id + ': ' + c.caras + ' caras, ' + c.vertices + ' vértices, ' +
-              c.aristas + ' aristas' +
-              (c.estanco ? '  — estanco ✓' : '  — ABIERTO: ' + c.abiertas + ' aristas libres, ' +
-                                              c.noManifold + ' no-manifold'));
+              c.aristas + ' aristas  —  ' + est + man);
       if (!c.estanco) bad++;
     }
     if (bad) {
