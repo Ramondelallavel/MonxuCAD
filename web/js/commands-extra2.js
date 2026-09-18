@@ -29,7 +29,11 @@
   Cmd.add(['AISLAROBJETOS', 'ISOLATEOBJECTS', 'AISLAR'], { group: 'view', icon: 'view', title: 'Aislar objetos' }, async function (ctx) {
     var sel = await ctx.getSelection('Designe objetos a aislar');
     if (!sel || !sel.length) return;
-    ctx.doc.entities.forEach(function (e) { if (sel.indexOf(e) < 0) e.hidden = true; });
+    ctx.doc.mark('AISLAR');
+    ctx.doc.entities.forEach(function (e) {
+      if (sel.indexOf(e) < 0 && !e.hidden) { ctx.doc.touch(e); e.hidden = true; }
+    });
+    ctx.doc.rev++;
     ctx.app.isolated = true;
     ctx.app.selSet = [];
     ctx.out(sel.length + ' objeto(s) aislado(s). FINAISLAR los devuelve todos.');
@@ -39,7 +43,9 @@
   Cmd.add(['OCULTAROBJETOS', 'HIDEOBJECTS'], { group: 'view', icon: 'view', title: 'Ocultar objetos' }, async function (ctx) {
     var sel = await ctx.getSelection('Designe objetos a ocultar');
     if (!sel || !sel.length) return;
-    sel.forEach(function (e) { e.hidden = true; });
+    ctx.doc.mark('OCULTAR');
+    sel.forEach(function (e) { if (!e.hidden) { ctx.doc.touch(e); e.hidden = true; } });
+    ctx.doc.rev++;
     ctx.app.isolated = true;
     ctx.app.selSet = [];
     ctx.out(sel.length + ' objeto(s) oculto(s).');
@@ -48,8 +54,12 @@
 
   Cmd.add(['FINAISLAR', 'UNISOLATEOBJECTS', 'MOSTRARTODO'], { group: 'view', icon: 'view', title: 'Finalizar aislamiento' }, async function (ctx) {
     var n = 0;
-    ctx.doc.entities.forEach(function (e) { if (e.hidden) { delete e.hidden; n++; } });
-    ctx.doc.layouts.forEach(function (l) { l.entities.forEach(function (e) { if (e.hidden) { delete e.hidden; n++; } }); });
+    ctx.doc.mark('FINAISLAR');
+    function show(e) { if (e.hidden) { ctx.doc.touch(e); delete e.hidden; n++; } }
+    ctx.doc.entities.forEach(show);
+    ctx.doc.layouts.forEach(function (l) { l.entities.forEach(show); });
+    if (!n) ctx.doc.discardTx();
+    ctx.doc.rev++;
     ctx.app.isolated = false;
     ctx.out(n + ' objeto(s) devuelto(s) a la vista.');
     ctx.app.refresh();
@@ -282,7 +292,7 @@
       } else {
         res = CAD.Region.apply(doc, src, op);
       }
-      if (res.error) { ctx.err(res.error); doc.undoStack.pop(); return; }
+      if (res.error) { ctx.err(res.error); doc.discardTx(); return; }
       var proto = src[0];
       doc.removeAll(src);
       (res.loops || []).forEach(function (l) {
@@ -370,7 +380,7 @@
     ctx.doc.removeAll(dup);
     ctx.out(list.length + ' objeto(s) analizado(s).');
     ctx.out(dup.length + ' objeto(s) duplicado(s) eliminado(s).', dup.length ? 'ok' : undefined);
-    if (!dup.length) ctx.doc.undoStack.pop();
+    if (!dup.length) ctx.doc.discardTx();
     ctx.app.selSet = [];
     ctx.app.refresh();
   });

@@ -18,6 +18,15 @@
 
   T.clear = function () { T.pts.length = 0; T.hover = null; };
 
+  /* Adquisición explícita de un punto de rastreo (referencia TT) */
+  T.acquire = function (p, label) {
+    if (!p) return;
+    for (var i = 0; i < T.pts.length; i++)
+      if (Math.abs(T.pts[i].x - p.x) < 1e-9 && Math.abs(T.pts[i].y - p.y) < 1e-9) return;
+    T.pts.push({ x: p.x, y: p.y, type: 'tt', label: label || 'Rastreo temporal' });
+    while (T.pts.length > T.MAX) T.pts.shift();
+  };
+
   T.angles = function (doc) {
     var out;
     if (doc.vars.POLARMODE) {

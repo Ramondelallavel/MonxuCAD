@@ -54,6 +54,7 @@
     this.wireCanvas();
     this.wireKeys();
     this.wireFile();
+    this.initInput();
 
     window.addEventListener('resize', function () { self.resize(); });
     if (window.ResizeObserver) {
@@ -61,8 +62,10 @@
     }
     this.resize();
 
-    this.sampleDrawing();
-    this.r.zoomBox(E.extentsAll(this.doc.entities, this.doc));
+    /* Se arranca con el dibujo en blanco, como AutoCAD.  El ejemplo
+       sigue disponible con el comando EJEMPLO. */
+    this.r.view = { cx: 0, cy: 0, zoom: 1 };
+    this.r.zoomBox({ x1: -100, y1: -75, x2: 500, y2: 375 });
     this.banner();
     this.setPrompt('Comando: ');
     this.refresh();
@@ -71,10 +74,57 @@
 
   App.prototype.banner = function () {
     this.out('MonxuCAD  —  estación de dibujo y diseño 2D', 'ok');
-    this.out('Dibujo de ejemplo cargado con su presentación acotada. Escriba un comando o púlselo en la cinta.');
+    this.out('Dibujo nuevo. Escriba un comando o púlselo en la cinta.  EJEMPLO carga una planta de muestra.');
     this.out('Dibujo: LINEA POL CIRCULO ARCO RECTANG LINEAM SOMBREA CONTORNO   Modificar: RECORTA EMPALME DESFASE MATRIZ');
     this.out('Acotar: ACOTALINEAL ACOTARAPIDA   Papel: VENTANAS ESPACIOM ESCALAVP CAJETIN   Bloques: PALETABLOQUES');
     this.out('AYUDA lista los ' + Object.keys(CAD.Cmd.reg).length + ' comandos.  ABRE importa DXF.  EXPORTAR escribe DXF/PDF/SVG.');
+  };
+
+  /* Bloqueo de campo de la entrada dinámica (tecla Tab).
+     En AutoCAD, al bloquear la distancia o el ángulo el cursor queda
+     restringido a ese valor; aquí se proyecta el punto resuelto. */
+  App.prototype.applyDynLock = function (base, wp) {
+    var L = this.dynLock;
+    if (!L || !wp) return wp;
+    var a = L.dynA !== undefined && L.dynA !== '' ? parseFloat(L.dynA) : null;
+    var b = L.dynB !== undefined && L.dynB !== '' ? parseFloat(L.dynB) : null;
+    if (a !== null && !isFinite(a)) a = null;
+    if (b !== null && !isFinite(b)) b = null;
+    if (a === null && b === null) return wp;
+    if (L.sep === '<') {
+      if (!base) return wp;
+      var d = a !== null ? a : G.dist(base, wp);
+      var ang = b !== null ? G.rad(b) : G.ang(base, wp);
+      return G.polar(base, ang, d);
+    }
+    var x = wp.x, y = wp.y;
+    if (a !== null) x = base ? base.x + a : a;
+    if (b !== null) y = base ? base.y + b : b;
+    return { x: x, y: y };
+  };
+
+  /* Envía lo escrito en los campos de la entrada dinámica.
+     En AutoCAD, a partir del segundo punto lo que se teclea ahí es
+     RELATIVO al punto anterior (DYNPICOORDS = 0); anteponiendo # se
+     fuerza absoluto.  En la línea de comandos, en cambio, se sigue
+     interpretando como absoluto salvo que se escriba @. */
+  App.prototype.commitDyn = function () {
+    var A = document.getElementById('dynA'), B = document.getElementById('dynB');
+    var a = String(A.value || '').trim(), b = String(B.value || '').trim();
+    var sep = document.getElementById('dynSep').textContent;
+    this.dynLock = null;
+    if (!a && !b) { this.focusCmd(); return; }
+    var abs = false;
+    if (a[0] === '#') { abs = true; a = a.slice(1); }
+    if (b[0] === '#') { abs = true; b = b.slice(1); }
+    var rel = sep === '<';
+    if (!rel && !abs) {
+      var p = this.pending;
+      var dyn = this.doc.vars.DYNMODE && (this.doc.vars.DYNPICOORDS === undefined ? 0 : this.doc.vars.DYNPICOORDS) === 0;
+      if (dyn && p && p.kind === 'point' && p.opts.base) rel = true;
+    }
+    this.feedInput((rel ? '@' : '') + a + sep + b);
+    this.focusCmd();
   };
 
   App.prototype.focusCmd = function () {
@@ -90,14 +140,39 @@
     this.refresh();
   };
 
-  App.prototype.refresh = function () {
+  /* Durante el encuadre o el zoom se baja el detalle si la escena es
+     cara de construir, y se repinta completa al detenerse. */
+  App.prototype.navigating = function () {
     var self = this;
+    if ((this.r.lastSceneMs || 0) > 28) this.r.fastMode = true;
+    clearTimeout(this._navT);
+    this._navT = setTimeout(function () {
+      if (!self.r.fastMode) return;
+      self.r.fastMode = false;
+      self.r.invalidateScene();
+      self.refresh();
+    }, 170);
+  };
+
+  App.prototype.refresh = function (hard) {
+    var self = this;
+    if (hard) {
+      if (CAD.Cache) CAD.Cache.clear();
+      if (CAD.dropIndex) CAD.dropIndex();
+      this.r.invalidateScene();
+    }
     if (this._raf) return;
     this._raf = requestAnimationFrame(function () {
       self._raf = 0;
       self.r.render();
-      self.ui.syncPropBar();
-      self.ui.renderProps();
+      /* la interfaz sólo se rehace cuando cambia algo que muestra */
+      var sig = self.doc.rev + '|' + self.selSet.length + '|' + (self.selSet[0] ? self.selSet[0].id : 0) +
+        '|' + self.doc.vars.CLAYER + '|' + self.doc.vars.CECOLOR + '|' + self.doc.vars.CELTYPE + '|' + self.doc.vars.CELWEIGHT;
+      if (sig !== self._uiSig) {
+        self._uiSig = sig;
+        self.ui.syncPropBar();
+        self.ui.renderProps();
+      }
     });
   };
 
@@ -205,7 +280,7 @@
 
       var ent = self.pickAt(sp);
       /* ciclo de selección cuando hay varios objetos superpuestos */
-      if (!self.pending && !e.shiftKey && self.doc.vars.SELECTIONCYCLING) {
+      if (!self.pending && !e.shiftKey && self.doc.vars.SELECTIONCYCLING >= 2) {
         var all = self.pickAllAt(sp);
         if (all.length > 1) {
           self.ui.cycleMenu(all, sp, function (chosen) {
@@ -217,11 +292,11 @@
         }
       }
       if (self.pending && (self.pending.kind === 'point' || self.pending.kind === 'dist' || self.pending.kind === 'angle' || self.pending.kind === 'real')) {
-        self.feedPick(sp, self.cursorWorld, ent);
+        self.feedPick(sp, self.cursorWorld, ent, e.shiftKey);
         return;
       }
       if (self.pending && self.pending.kind === 'entity') {
-        self.feedPick(sp, self.cursorWorld, ent);
+        self.feedPick(sp, self.cursorWorld, ent, e.shiftKey);
         return;
       }
       if (ent && (!self.pending || self.pending.kind === 'select')) {
@@ -231,13 +306,18 @@
         self.refresh();
         return;
       }
-      /* ventana de designación */
+      /* Ventana de designación.  AutoCAD admite las dos formas
+         (PICKDRAG = 2): pulsar y arrastrar, o dar un clic, mover y dar
+         otro clic.  La segunda es la de fábrica y es la que se echaba
+         en falta aquí. */
+      if (self.pendBox) { self.closePendBox(sp, e.shiftKey); return; }
       drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey, path: [sp], plen: 0 };
     });
 
     cv.addEventListener('pointermove', function (e) {
       var sp = local(e);
       if (drag && drag.mode === 'pan') {
+        self.navigating();
         self.r.panBy(sp.x - drag.last.x, sp.y - drag.last.y);
         drag.last = sp;
         self.cursorScreen = sp;
@@ -245,6 +325,7 @@
         return;
       }
       if (drag && drag.mode === 'rtzoom') {
+        self.navigating();
         var dy = drag.last.y - sp.y;
         self.r.zoomBy(Math.exp(dy * 0.006), { x: self.r.W / 2, y: self.r.H / 2 });
         drag.last = sp;
@@ -252,6 +333,25 @@
         return;
       }
       self.updateCursor(sp, e);
+      if (!drag && self.pendBox) {
+        var pb = self.pendBox;
+        var lastP = pb.path[pb.path.length - 1];
+        var st = Math.hypot(sp.x - lastP.x, sp.y - lastP.y);
+        if (st > 3) { pb.plen += st; pb.path.push({ x: sp.x, y: sp.y }); }
+        var ch = Math.hypot(sp.x - pb.startScreen.x, sp.y - pb.startScreen.y);
+        pb.lasso = pb.plen > Math.max(60, ch * 1.7);
+        var cr = self.cursorWorld.x < pb.start.x;
+        if (self.pending && self.pending.forceMode) cr = self.pending.forceMode === 'crossing';
+        if (pb.lasso) {
+          self.pickBox = null;
+          self.lassoPath = { pts: pb.path.map(function (q) { return self.r.s2w(q); }), crossing: cr };
+        } else {
+          self.lassoPath = null;
+          self.pickBox = { p1: pb.start, p2: self.cursorWorld, crossing: cr };
+        }
+        self.refresh();
+        return;
+      }
       if (drag && drag.mode === 'box') {
         var last = drag.path[drag.path.length - 1];
         var step = Math.hypot(sp.x - last.x, sp.y - last.y);
@@ -300,10 +400,14 @@
             var hit = self.doc.selectable().filter(function (en) { return E.hitBox(en, box, crossing, self.doc); });
             self.removeFromSelection(hit);
           } else self.selectBox(drag.start, self.cursorWorld, crossing);
-        } else if (!self.pending) {
-          self.selSet = [];
-        } else if (self.pending.kind === 'select') {
-          self.out('No se encontró ningún objeto.', 'warn');
+        } else {
+          /* clic sin arrastre sobre el vacío: queda a la espera del
+             segundo clic para cerrar la ventana */
+          self.pendBox = { start: drag.start, startScreen: drag.startScreen,
+                           shift: drag.shift, path: [drag.startScreen], plen: 0, t: Date.now() };
+          drag = null;
+          self.refresh();
+          return;
         }
         self.pickBox = null;
       }
@@ -324,17 +428,20 @@
 
     cv.addEventListener('wheel', function (e) {
       e.preventDefault();
+      self.navigating();
       var sp = local(e);
       self.r.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, sp);
       self.updateCursor(sp, e);
       self.refresh();
     }, { passive: false });
 
+    /* El menú contextual lo gobierna input.js (pulsación corta = Intro,
+       larga = menú), igual que AutoCAD.  Aquí sólo quedan los casos
+       que se adelantan a esa lógica. */
     cv.addEventListener('contextmenu', function (e) {
       e.preventDefault();
       if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
       if (e.shiftKey) { self.ui.osnapMenu(e.clientX, e.clientY); return; }
-      self.ui.contextMenu(e.clientX, e.clientY);
     });
 
     cv.addEventListener('dblclick', function (e) {
@@ -355,14 +462,65 @@
       }
       var ent = self.pickAt(sp);
       if (!ent) return;
+      if (self.doc.vars.DBLCLKEDIT === 0) { self.selSet = [ent]; self.ui.togglePalette('props', true); self.refresh(); return; }
       self.selSet = [ent];
+      /* el objeto pulsado viaja con el comando: no se vuelve a preguntar */
+      self.pickedEntity = { ent: ent, p: self.r.s2w(sp) };
       if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'DIMENSION') self.startCommand('EDITTEXTO');
       else if (ent.type === 'HATCH' && !ent.wipeout) self.startCommand('EDITSOMB');
       else if (ent.type === 'LWPOLYLINE') self.startCommand('EDITPOL');
       else if (ent.type === 'INSERT' && ent.attribs && ent.attribs.length) self.startCommand('EDITATR');
-      else self.ui.togglePalette('props', true);
+      else { self.pickedEntity = null; self.ui.togglePalette('props', true); }
       self.refresh();
     });
+  };
+
+  /* Cierra la ventana de designación abierta con el primer clic */
+  App.prototype.closePendBox = function (sp, shift) {
+    var pb = this.pendBox;
+    this.pendBox = null;
+    if (!pb) return;
+    var moved = Math.abs(sp.x - pb.startScreen.x) > 3 || Math.abs(sp.y - pb.startScreen.y) > 3;
+    if (!moved) {
+      /* dos clics en el mismo sitio: se entiende como "no designar nada" */
+      this.pickBox = null;
+      this.lassoPath = null;
+      if (!this.pending) this.selSet = [];
+      else if (this.pending.kind === 'select') this.out('No se encontró ningún objeto.', 'warn');
+      this.refresh();
+      return;
+    }
+    var crossing = this.cursorWorld.x < pb.start.x;
+    if (this.pending && this.pending.forceMode) {
+      crossing = this.pending.forceMode === 'crossing';
+      this.pending.forceMode = null;
+    }
+    if (pb.lasso) {
+      var poly = pb.path.map(function (q) { return this.r.s2w(q); }, this);
+      var hitL = this.selectLasso(poly, crossing);
+      if (shift) this.removeFromSelection(hitL); else this.addToSelection(hitL);
+    } else {
+      var box = {
+        x1: Math.min(pb.start.x, this.cursorWorld.x), y1: Math.min(pb.start.y, this.cursorWorld.y),
+        x2: Math.max(pb.start.x, this.cursorWorld.x), y2: Math.max(pb.start.y, this.cursorWorld.y)
+      };
+      this.lastSelBox = box;
+      if (shift) {
+        var self = this;
+        var hit = this.doc.selectable().filter(function (en) { return E.hitBox(en, box, crossing, self.doc); });
+        this.removeFromSelection(hit);
+      } else this.selectBox(pb.start, this.cursorWorld, crossing);
+    }
+    this.pickBox = null;
+    this.lassoPath = null;
+    this.refresh();
+  };
+
+  App.prototype.clearPendBox = function () {
+    if (!this.pendBox) return;
+    this.pendBox = null;
+    this.pickBox = null;
+    this.lassoPath = null;
   };
 
   App.prototype.pushLayerState = function () {
@@ -412,6 +570,11 @@
 
   /* Resuelve el punto del cursor con refent, orto y polar */
   App.prototype.updateCursor = function (sp, ev) {
+    /* Mover el cursor deshace el recorrido del tabulador entre capturas */
+    if (this.snapTab && this.snapTabAt &&
+        (Math.abs(sp.x - this.snapTabAt.x) > 2 || Math.abs(sp.y - this.snapTabAt.y) > 2)) {
+      this.snapTab = 0; this.snapTabAt = null;
+    }
     this.cursorScreen = sp;
     var base = null;
     var p = this.pending;
@@ -420,6 +583,7 @@
 
     var res = CAD.Snap.resolve(this, sp, base, { noOsnap: !this.osnapOn && !this.osnapOverride });
     this.cursorWorld = res.p;
+    if (this.dynLock && p && p.kind === 'point') this.cursorWorld = this.applyDynLock(base, this.cursorWorld);
     this.snapHit = res.snap;
     this.trackLines = res.tracks && res.tracks.length ? res.tracks : null;
     this.trackLabel = res.label || null;
@@ -639,6 +803,24 @@
     this.setPrompt('Primer punto del medio: ');
   };
 
+  /* DESDE: se captura un punto de partida y el siguiente se mide como
+     desplazamiento desde él.  Es la referencia "from" de AutoCAD. */
+  App.prototype.startFrom = function () {
+    this.fromCollect = true;
+    this.out('Desde: punto base');
+    this.setPrompt('Punto base: ');
+    this.refresh();
+  };
+
+  /* Punto de rastreo temporal: se adquiere un punto para que salgan
+     de él las trayectorias de alineación, sin usarlo como dato. */
+  App.prototype.startTrackPoint = function () {
+    this.ttCollect = true;
+    this.out('Punto de rastreo temporal');
+    this.setPrompt('Precise el punto de rastreo temporal: ');
+    this.refresh();
+  };
+
   App.prototype.applyGrip = function (p) {
     var gd = this.gripDrag;
     if (!gd) return;
@@ -673,8 +855,20 @@
       if (fn[e.key]) { e.preventDefault(); fn[e.key](); return; }
       if (inDialog) return;
 
+      /* Tabulador: recorre las capturas solapadas bajo la mira */
+      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !inDialog &&
+          self.pending && self.pending.kind === 'point' && self.cursorScreen &&
+          self.snapCands && self.snapCands.length > 1) {
+        e.preventDefault();
+        self.snapTab = (self.snapTab || 0) + 1;
+        self.snapTabAt = { x: self.cursorScreen.x, y: self.cursorScreen.y };
+        self.updateCursor(self.cursorScreen);
+        self.refresh();
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
+        self.snapTab = 0; self.snapTabAt = null;
         if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
         if (self.gripDrag) { self.cancelGrip(); return; }
         self.ui.closeMenus();
@@ -714,8 +908,7 @@
         return;
       }
       if (e.key === 'Enter' && self.realtimeDone) { e.preventDefault(); self.endRealtime(); return; }
-      /* cualquier otra tecla imprimible va a la línea de comandos */
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) self.focusCmd();
+      /* el reenvío de teclas a la línea de comandos lo hace input.js */
     });
 
     /* entrada dinámica: escribir en los campos flotantes */
@@ -724,12 +917,22 @@
       el.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
-          var a = document.getElementById('dynA').value, b = document.getElementById('dynB').value;
-          var sep = document.getElementById('dynSep').textContent;
-          self.feedInput((sep === '<' ? '@' : '') + a + sep + b);
-          self.focusCmd();
+          self.commitDyn();
         } else if (e.key === 'Escape') { self.focusCmd(); self.cancel(); }
+        else if (e.key === 'Tab') {
+          /* Tab bloquea el campo y pasa al otro, como en AutoCAD */
+          e.preventDefault();
+          var other = id === 'dynA' ? 'dynB' : 'dynA';
+          self.dynLock = self.dynLock || {};
+          self.dynLock.sep = document.getElementById('dynSep').textContent;
+          self.dynLock[id] = document.getElementById(id).value;
+          var o = document.getElementById(other);
+          o.focus(); o.select();
+          self.refresh();
+        }
       });
+      el.addEventListener('focus', function () { self.dynTyping = true; });
+      el.addEventListener('blur', function () { self.dynTyping = false; });
     });
   };
 
@@ -782,7 +985,13 @@
       return;
     }
     var rd = new FileReader();
+    this.ui.flashResult('Abriendo ' + name + ' …');
+    this.out('Abriendo ' + name + ' (' + (file.size / 1048576).toFixed(1) + ' MB) …');
     rd.onload = function () {
+      /* un fotograma para que el aviso llegue a pintarse */
+      requestAnimationFrame(function () { setTimeout(function () { parse(); }, 0); });
+      function parse() {
+      var t0 = performance.now();
       try {
         var txt = String(rd.result);
         var doc;
@@ -803,9 +1012,10 @@
         if (G.bboxValid(b)) self.r.zoomBox(b);
         self.ui.syncStatus();
         self.ui.buildRibbon();
-        self.out('Abriendo ' + name + ' …');
-        self.out(doc.entities.length + ' objeto(s), ' + doc.layerOrder.length + ' capa(s), ' +
-          Object.keys(doc.blocks).length + ' bloque(s).', 'ok');
+        self.out(doc.entities.length.toLocaleString('es-ES') + ' objeto(s), ' + doc.layerOrder.length +
+          ' capa(s), ' + Object.keys(doc.blocks).length + ' bloque(s) en ' +
+          ((performance.now() - t0) / 1000).toFixed(2) + ' s.', 'ok');
+        self.ui.flashResult(doc.entities.length.toLocaleString('es-ES') + ' objetos cargados');
         if (doc.warnings && doc.warnings.length) {
           self.out('Entidades no admitidas omitidas: ' + doc.warnings.join(', '), 'warn');
         }
@@ -813,6 +1023,7 @@
       } catch (err) {
         self.out('Error al leer el archivo: ' + err.message, 'err');
         console.error(err);
+      }
       }
     };
     rd.readAsText(file);
@@ -1139,6 +1350,7 @@
   function start() {
     var app = new CAD.App();
     window.CADAPP = app;
+    CAD.APP = app;
     app.boot();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

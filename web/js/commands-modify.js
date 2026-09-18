@@ -224,7 +224,7 @@
       count++;
       ctx.app.refresh();
     }
-    if (!count) ctx.doc.undoStack.pop();
+    if (!count) ctx.doc.discardTx();
   });
 
   function ghost(ctx, sel, m) {
@@ -355,7 +355,7 @@
       }
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
 
   function offsetEntity(ctx, ent, d, side, through) {
@@ -471,27 +471,100 @@
   /* ============================================================
      RECORTAR / ALARGAR
      ============================================================ */
+  /* RECORTA y ALARGA.
+     Desde AutoCAD 2021 el modo de fábrica es el "rápido" (TRIMEXTENDMODE
+     = 2): no se designan aristas, se pincha directamente lo que sobra y
+     todo lo visible hace de contorno.  Manteniendo Mayús se hace la
+     operación contraria.  El modo clásico (designar aristas primero)
+     sigue disponible por la opción Corte / Contorno. */
   async function trimExtend(ctx, extendMode) {
     var doc = ctx.doc;
-    ctx.out('Parámetros actuales: Proyección=SCP, Arista=Ninguna');
-    ctx.out(extendMode ? 'Designe aristas de contorno ...' : 'Designe aristas de corte ...');
-    var bounds = await ctx.getSelection('Designe objetos o <designar todo>', { force: true, allowNone: true });
-    if (!bounds || !bounds.length) bounds = doc.visible();
-    ctx.app.selSet = [];
-    var bp = boundaryPrims(doc, bounds);
+    var quick = doc.vars.TRIMEXTENDMODE === undefined ? 2 : doc.vars.TRIMEXTENDMODE;
+    var bp = null, bounds = null;
+
+    if (quick !== 2) {
+      ctx.out('Parámetros actuales: Proyección=SCP, Arista=Ninguna, Modo=Estándar');
+      ctx.out(extendMode ? 'Designe aristas de contorno ...' : 'Designe aristas de corte ...');
+      bounds = await ctx.getSelection('Designe objetos o <designar todo>', { force: true, allowNone: true });
+      if (!bounds || !bounds.length) bounds = doc.visible();
+      ctx.app.selSet = [];
+      bp = boundaryPrims(doc, bounds);
+    } else {
+      ctx.out('Parámetros actuales: Proyección=SCP, Arista=Ninguna, Modo=Rápido');
+    }
+
     doc.mark(extendMode ? 'ALARGA' : 'RECORTA');
-    var any = false;
+    var any = false, rev = -1;
+    var kws = extendMode
+      ? ['Contorno', 'Captura', 'Modo', 'Proyección', 'Borrar', 'desHacer']
+      : ['Corte', 'Captura', 'Modo', 'Proyección', 'Borrar', 'desHacer'];
+
     while (true) {
-      var e = await ctx.getEntity(
-        extendMode ? 'Designe objeto a alargar o <salir>' : 'Designe objeto a recortar o <salir>',
-        { allowNone: true });
+      /* en modo rápido el contorno se recalcula si el dibujo ha cambiado */
+      if (quick === 2 && doc.rev !== rev) {
+        bp = boundaryPrims(doc, doc.visible());
+        rev = doc.rev;
+      }
+      var msg = extendMode
+        ? 'Designe objeto a alargar o mayús-designe para recortar o'
+        : 'Designe objeto a recortar o mayús-designe para alargar o';
+      if (quick !== 2) msg = extendMode ? 'Designe objeto a alargar o <salir>' : 'Designe objeto a recortar o <salir>';
+      var e = await ctx.getEntity(msg, { allowNone: true, keywords: quick === 2 ? kws : null });
       if (!e) break;
-      var ok = extendMode ? doExtend(ctx, e.ent, e.p, bp) : doTrim(ctx, e.ent, e.p, bp);
-      if (ok) any = true;
-      else ctx.err(extendMode ? 'El objeto no intersecta ninguna arista.' : 'El objeto no intersecta ninguna arista de corte.');
+
+      if (e.kw) {
+        if (e.kw === 'M') {
+          var mk = await ctx.getKeyword('Indique un modo de recorte',
+            ['Rápido', 'Estándar'], { def: quick === 2 ? 'Rápido' : 'Estándar' });
+          if (mk) {
+            quick = doc.vars.TRIMEXTENDMODE = (mk.kw === 'R' ? 2 : 0);
+            rev = -1;
+            if (quick !== 2) {
+              ctx.out(extendMode ? 'Designe aristas de contorno ...' : 'Designe aristas de corte ...');
+              bounds = await ctx.getSelection('Designe objetos o <designar todo>', { force: true, allowNone: true });
+              if (!bounds || !bounds.length) bounds = doc.visible();
+              ctx.app.selSet = [];
+              bp = boundaryPrims(doc, bounds);
+            }
+          }
+          continue;
+        }
+        if (e.kw === 'B') {
+          var del = await ctx.getSelection('Designe objetos a borrar', { force: true, allowNone: true });
+          if (del && del.length) {
+            del.forEach(function (x) { doc.remove(x); });
+            any = true;
+            rev = -1;
+            ctx.app.selSet = [];
+            ctx.app.refresh(true);
+          }
+          continue;
+        }
+        if (e.kw === 'H') {
+          if (doc.undoStack.length) { doc.undo(); rev = -1; ctx.app.refresh(true); }
+          continue;
+        }
+        if (e.kw === 'C' || e.kw === 'CO' || e.kw === 'CA') {
+          /* Corte / Contorno: pasa al modo estándar designando aristas */
+          ctx.out(extendMode ? 'Designe aristas de contorno ...' : 'Designe aristas de corte ...');
+          bounds = await ctx.getSelection('Designe objetos o <designar todo>', { force: true, allowNone: true });
+          if (!bounds || !bounds.length) bounds = doc.visible();
+          ctx.app.selSet = [];
+          bp = boundaryPrims(doc, bounds);
+          quick = 0;
+          continue;
+        }
+        continue;
+      }
+
+      /* Mayús invierte la operación, igual que en AutoCAD */
+      var doExt = e.shift ? !extendMode : extendMode;
+      var ok = doExt ? doExtend(ctx, e.ent, e.p, bp) : doTrim(ctx, e.ent, e.p, bp);
+      if (ok) { any = true; rev = -1; }
+      else ctx.err(doExt ? 'El objeto no intersecta ninguna arista.' : 'El objeto no intersecta ninguna arista de corte.');
       ctx.app.refresh();
     }
-    if (!any) doc.undoStack.pop();
+    if (!any) doc.discardTx();
   }
 
   function doTrim(ctx, ent, pick, bp) {
@@ -663,7 +736,7 @@
       var e2 = await ctx.getEntity('Designe el segundo objeto o mantenga pulsada Mayús para aplicar una esquina');
       if (!e2) return;
       ctx.doc.mark('EMPALME');
-      if (!doFillet(ctx, e1, e2, r)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.undoStack.pop(); }
+      if (!doFillet(ctx, e1, e2, r)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.discardTx(); }
       ctx.app.refresh();
       return;
     }
@@ -808,7 +881,7 @@
       ctx.doc.mark('CHAFLAN');
       var A = e1.ent, B = e2.ent;
       var ints = G.interLine(A.p1, A.p2, B.p1, B.p2, true, true);
-      if (!ints.length) { ctx.err('Las líneas son paralelas.'); ctx.doc.undoStack.pop(); return; }
+      if (!ints.length) { ctx.err('Las líneas son paralelas.'); ctx.doc.discardTx(); return; }
       var corner = ints[0];
       var dirA = G.ang(corner, G.dist(A.p1, corner) > G.dist(A.p2, corner) ? A.p1 : A.p2);
       var dirB = G.ang(corner, G.dist(B.p1, corner) > G.dist(B.p2, corner) ? B.p1 : B.p2);
@@ -935,7 +1008,7 @@
       } else ctx.err('Objeto no válido.');
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
 
   /* ============================================================
@@ -973,7 +1046,7 @@
         break;
       }
     }
-    if (joined < 2) { ctx.err('No hay objetos contiguos que unir.'); ctx.doc.undoStack.pop(); return; }
+    if (joined < 2) { ctx.err('No hay objetos contiguos que unir.'); ctx.doc.discardTx(); return; }
     var closed = G.dist(merged.verts[0], merged.verts[merged.verts.length - 1]) < tol;
     if (closed) merged.verts.pop();
     var src = merged.ent;
@@ -1006,7 +1079,7 @@
       parts.forEach(function (p) { ctx.doc.add(p); });
       n++;
     });
-    if (!n) { ctx.err('No se puede descomponer estos objetos.'); ctx.doc.undoStack.pop(); }
+    if (!n) { ctx.err('No se puede descomponer estos objetos.'); ctx.doc.discardTx(); }
     ctx.app.selSet = [];
     ctx.app.refresh();
   });

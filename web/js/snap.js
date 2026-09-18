@@ -155,21 +155,39 @@
     if (!Object.keys(active).length) return null;
 
     var box = { x1: wp.x - tolW, y1: wp.y - tolW, x2: wp.x + tolW, y2: wp.y + tolW };
+    var cand = CAD.queryVisible(app, box);
     var near = [];
-    doc.visible().forEach(function (e) {
-      if (e.type === 'HATCH') return;
-      var b = E.extents(e, doc);
-      if (!G.bboxValid(b)) { near.push(e); return; }
-      if (G.bboxHit(G.bboxGrow(b, tolW), box)) near.push(e);
-    });
-    if (near.length > 400) near = near.slice(0, 400);
+    for (var ci = 0; ci < cand.length && near.length < 220; ci++) {
+      var ce = cand[ci];
+      if (ce.type === 'HATCH') continue;
+      var cb = E.bboxOf(ce, doc);
+      if (!G.bboxValid(cb)) { near.push(ce); continue; }
+      if (G.bboxHit(G.bboxGrow(cb, tolW), box)) near.push(ce);
+    }
 
     var cands = [];
+    /* Con una sustitución forzada (se ha tecleado CEN, MID, END…) no se
+       exige que el punto caiga bajo la mira: basta con apuntar al objeto
+       y se devuelve su punto notable, esté donde esté.  Es como se usa
+       en AutoCAD: para capturar el centro de un círculo se señala el
+       círculo, no el hueco del medio. */
+    var forced = opts.override && opts.override !== 'none';
+    var overEnts = null;
+    if (forced) {
+      overEnts = [];
+      near.forEach(function (e) {
+        if (E.hit(e, wp, tolW, doc)) overEnts.push(e);
+      });
+    }
+
     /* puntos notables */
     near.forEach(function (e) {
       E.snapPoints(e, doc).forEach(function (s) {
         if (!active[s.type]) return;
-        if (G.dist(s.p, wp) <= tolW) cands.push({ type: s.type, p: s.p, ent: e, d: G.dist(s.p, wp) });
+        var d = G.dist(s.p, wp);
+        if (d <= tolW) { cands.push({ type: s.type, p: s.p, ent: e, d: d }); return; }
+        /* objeto señalado y referencia forzada: vale aunque esté lejos */
+        if (forced && overEnts.indexOf(e) >= 0) cands.push({ type: s.type, p: s.p, ent: e, d: d + tolW * 10 });
       });
     });
 
@@ -203,14 +221,16 @@
 
     /* perpendicular / tangente respecto al punto base */
     if ((active.per || active.tan) && opts.base) {
+      var lim = forced ? tolW * 1e6 : tolW * 1.6;
       getPrims().forEach(function (pr) {
+        if (forced && overEnts.indexOf(pr.ent) < 0 && overEnts.length) return;
         if (active.per) {
           var q = PR.perp(pr, opts.base);
-          if (q && G.dist(q, wp) <= tolW * 1.6) cands.push({ type: 'per', p: q, ent: pr.ent, d: G.dist(q, wp) * 0.9 });
+          if (q && G.dist(q, wp) <= lim) cands.push({ type: 'per', p: q, ent: pr.ent, d: G.dist(q, wp) * 0.9 });
         }
         if (active.tan) {
           PR.tangents(pr, opts.base).forEach(function (q2) {
-            if (G.dist(q2, wp) <= tolW * 1.6) cands.push({ type: 'tan', p: q2, ent: pr.ent, d: G.dist(q2, wp) * 0.9 });
+            if (G.dist(q2, wp) <= lim) cands.push({ type: 'tan', p: q2, ent: pr.ent, d: G.dist(q2, wp) * 0.9 });
           });
         }
       });
@@ -236,14 +256,30 @@
       });
     }
 
-    if (!cands.length) return null;
+    if (!cands.length) { app.snapCands = []; return null; }
     cands.sort(function (a, b) {
       var pa = PRIORITY.indexOf(a.type), pb = PRIORITY.indexOf(b.type);
       if (pa !== pb) return pa - pb;
       return a.d - b.d;
     });
-    var best = cands[0];
-    return { type: best.type, p: { x: best.p.x, y: best.p.y }, ent: best.ent, label: CAD.SNAP_LABEL[best.type] || best.type };
+    /* Se quitan los repetidos: dos objetos que comparten un extremo dan
+       la misma captura y el recorrido con el tabulador se atascaría. */
+    var uniq = [];
+    for (var ui = 0; ui < cands.length; ui++) {
+      var cu = cands[ui], dup = false;
+      for (var uj = 0; uj < uniq.length; uj++) {
+        if (uniq[uj].type === cu.type && G.dist(uniq[uj].p, cu.p) < 1e-9) { dup = true; break; }
+      }
+      if (!dup) uniq.push(cu);
+      if (uniq.length >= 12) break;
+    }
+    app.snapCands = uniq;
+    /* El tabulador recorre las capturas bajo la mira, como en AutoCAD */
+    var idx = app.snapTab ? (app.snapTab % uniq.length) : 0;
+    var best = uniq[idx];
+    return { type: best.type, p: { x: best.p.x, y: best.p.y }, ent: best.ent,
+             label: (CAD.SNAP_LABEL[best.type] || best.type) +
+                    (uniq.length > 1 ? '   (' + (idx + 1) + '/' + uniq.length + ', Tab)' : '') };
   };
 
   function primBox(pr) {

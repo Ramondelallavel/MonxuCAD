@@ -16,7 +16,7 @@
     if (!opt) {
       opt = await ctx.getPoint('Precise esquina de ventana, indique un factor de escala (nX o nXP), o', {
         keywords: ['Todo', 'CEntro', 'Dinámico', 'Extensión', 'Previo', 'Escala', 'Ventana', 'Objeto'],
-        def: 'tiempo real', allowNone: true
+        def: 'tiempo real', allowNone: true, allowNumber: true
       });
     }
     if (opt === null) { return; }
@@ -27,7 +27,23 @@
       app.refresh();
       return;
     }
-    if (typeof opt === 'number') { r.pushView(); r.view.zoom *= opt; app.refresh(); return; }
+    /* factor de escala: n aplica sobre los límites del dibujo,
+       nX sobre la vista actual y nXP sobre la escala del papel */
+    if (typeof opt === 'number') opt = { num: opt, rel: true };
+    if (opt && opt.num !== undefined) {
+      if (!(opt.num > 0)) { ctx.err('El factor de escala tiene que ser mayor que cero.'); return; }
+      r.pushView();
+      if (opt.rel) r.view.zoom *= opt.num;
+      else {
+        var lm = { x1: ctx.doc.vars.LIMMIN.x, y1: ctx.doc.vars.LIMMIN.y,
+                   x2: ctx.doc.vars.LIMMAX.x, y2: ctx.doc.vars.LIMMAX.y };
+        r.zoomBox(lm, 1);
+        r.view.zoom *= opt.num;
+      }
+      app.refresh();
+      ctx.out('Zoom ' + G.fmt(opt.num, 4) + (opt.rel ? (opt.paper ? 'XP' : 'X') : ' (sobre los límites)'));
+      return;
+    }
     switch (opt.kw) {
       case 'T': {
         var b = E.extentsAll(ctx.doc.entities, ctx.doc);
@@ -186,7 +202,7 @@
       n++;
       ctx.app.refresh();
     }
-    if (!n) ctx.doc.undoStack.pop();
+    if (!n) ctx.doc.discardTx();
   });
 
   Cmd.add(['COLOR', 'COL', 'DDCOLOR'], { group: 'props', title: 'Color' }, async function (ctx) {
@@ -568,4 +584,18 @@
   Cmd.add(['LIMPIAPANTALLA', 'CLEANSCREENON', 'CLEANSCREEN'], { group: 'view', title: 'Pantalla limpia', transparent: true }, async function (ctx) {
     ctx.app.ui.toggleCleanScreen();
   });
+
+  /* Carga la planta de muestra que antes salía al arrancar */
+  Cmd.add(['EJEMPLO', 'SAMPLE', 'MUESTRA'], { group: 'file', icon: 'open', title: 'Dibujo de ejemplo' },
+  async function (ctx) {
+    if (ctx.doc.entities.length) {
+      var k = await ctx.getKeyword('Se perderá el dibujo actual. ¿Continuar?', ['Sí', 'No'], { def: 'No' });
+      if (!k || k.kw !== 'S') return;
+    }
+    ctx.app.sampleDrawing();
+    ctx.app.r.zoomBox(CAD.E.extentsAll(ctx.doc.entities, ctx.doc));
+    ctx.app.refresh(true);
+    ctx.out('Planta de vivienda de ejemplo cargada, con su presentación acotada.');
+  });
+
 })();

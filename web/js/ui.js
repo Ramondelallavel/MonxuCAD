@@ -121,11 +121,84 @@
     audit: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 13l2 2 4-4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     order: '<path d="M3 6h12M3 12h8M3 18h12"/><path d="M19 4v16M16 17l3 3 3-3"/>',
+    find: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
+    tree: '<path d="M5 4v14M5 8h6M5 13h6M5 18h6"/><rect x="11" y="5" width="8" height="5" rx="1"/><rect x="11" y="15" width="8" height="5" rx="1"/>',
+    plane: '<path d="M3 15 12 9l9 6-9 6z"/><path d="M12 9V3M9 5l3-2 3 2"/>',
+    hole: '<ellipse cx="12" cy="8" rx="5" ry="2.4"/><path d="M7 8v6a5 2.4 0 0 0 10 0V8"/><path d="M12 14v6M9 18l3 3 3-3"/>',
+    mesh: '<path d="M3 8h18M3 16h18M8 3v18M16 3v18"/><rect x="3" y="3" width="18" height="18" rx="1"/>',
+    surf: '<path d="M3 15c4-6 8-6 9-3s5 3 9-3"/><path d="M3 20c4-6 8-6 9-3s5 3 9-3"/><path d="M3 15v5M21 9v5M12 12v5"/>',
+    dimrad: '<circle cx="11" cy="13" r="7"/><path d="M11 13 20 4"/><path d="M17 4h3v3"/>',
     gradient: '<rect x="4" y="5" width="16" height="14"/><path d="M4 9h16M4 12h16M4 15h16" opacity=".5"/>',
     cycle: '<rect x="3" y="5" width="11" height="9"/><rect x="8" y="10" width="11" height="9"/><path d="M17 3l3 3-3 3" opacity=".7"/>',
     wipeout: '<rect x="3" y="6" width="18" height="12" stroke-dasharray="3 2"/><path d="M6 15l5-6 4 4 3-3" opacity=".45"/><rect x="7" y="9" width="10" height="6" fill="currentColor" stroke="none" opacity=".9"/>',
     boolean: '<circle cx="9.5" cy="12" r="6"/><circle cx="14.5" cy="12" r="6"/>',
-    table: '<rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M3 14.5h18M9 9v11M15 9v11"/>'
+    table: '<rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M3 14.5h18M9 9v11M15 9v11"/>',
+    /* --- 3D --- */
+    box3d: '<path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z"/><path d="M12 11.5 3.5 7M12 11.5 20.5 7M12 11.5v10"/>',
+    cyl3d: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v12a7 3 0 0 0 14 0V6"/>',
+    sph3d: '<circle cx="12" cy="12" r="8.5"/><ellipse cx="12" cy="12" rx="8.5" ry="3.4"/><ellipse cx="12" cy="12" rx="3.4" ry="8.5"/>',
+    cone3d: '<path d="M12 3 4.5 18M12 3l7.5 15"/><ellipse cx="12" cy="18" rx="7.5" ry="3"/>',
+    torus3d: '<ellipse cx="12" cy="12" rx="9" ry="5.5"/><ellipse cx="12" cy="12" rx="4" ry="2"/>',
+    wedge3d: '<path d="M3.5 18h13L20.5 7h-13z"/><path d="M3.5 18 7.5 7M16.5 18 20.5 7" opacity=".55"/>',
+    pyr3d: '<path d="M12 3 3.5 18h17z"/><path d="M12 3 8 18M12 3l4 15" opacity=".5"/>',
+    extrude: '<path d="M4 20h9v-9H4z"/><path d="m4 11 5-5h9v9l-5 5" opacity=".75"/><path d="M13 11 18 6"/>',
+    revolve: '<path d="M12 2v20" stroke-dasharray="2.5 2"/><path d="M14 5c5 2 5 12 0 14"/><ellipse cx="14" cy="12" rx="2.2" ry="7"/>',
+    sweep: '<path d="M3 19c6 0 4-13 11-13"/><ellipse cx="4" cy="19" rx="2.4" ry="1.4"/><ellipse cx="18.5" cy="6" rx="2.4" ry="1.4"/>',
+    loft: '<ellipse cx="12" cy="5" rx="4" ry="1.8"/><ellipse cx="12" cy="19" rx="8" ry="2.6"/><path d="M8 5 4 19M16 5l4 14"/>',
+    presspull: '<rect x="5" y="12" width="14" height="8"/><path d="M12 10V3M9 6l3-3 3 3"/>',
+    union: '<circle cx="9.5" cy="12" r="6"/><circle cx="14.5" cy="12" r="6"/>',
+    subtract: '<circle cx="9.5" cy="12" r="6"/><circle cx="14.5" cy="12" r="6" stroke-dasharray="3 2" opacity=".6"/>',
+    intersect: '<circle cx="9.5" cy="12" r="6" opacity=".5"/><circle cx="14.5" cy="12" r="6" opacity=".5"/><path d="M12 6.6a6 6 0 0 0 0 10.8 6 6 0 0 0 0-10.8z" fill="currentColor" stroke="none" opacity=".75"/>',
+    slice: '<path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z" opacity=".55"/><path d="M2 15 22 9"/>',
+    section: '<path d="M4 4h16v16H4z" opacity=".35"/><path d="M4 12h16"/><path d="M6 15h3M11 15h3M16 15h2" opacity=".8"/>',
+    flatshot: '<path d="M12 2.5 5 6.5v7l7 4 7-4v-7z" opacity=".5"/><path d="M4 21h16"/><path d="M8 21v-3M16 21v-3" opacity=".7"/>',
+    thicken: '<path d="M4 14c5-6 11-6 16 0" /><path d="M4 18c5-6 11-6 16 0" opacity=".6"/>',
+    smooth: '<path d="M3 16c4-9 14-9 18 0"/><circle cx="7" cy="12" r="1.2"/><circle cx="12" cy="9.6" r="1.2"/><circle cx="17" cy="12" r="1.2"/>',
+    massprop: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17" opacity=".4"/><circle cx="12" cy="12" r="1.8" fill="currentColor" stroke="none"/>',
+    interfere: '<circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/><path d="M12 8v5M12 15.5v.5" stroke-width="2"/>',
+    align3d: '<path d="M4 20 20 4"/><circle cx="4" cy="20" r="2"/><circle cx="20" cy="4" r="2"/><path d="M4 12h8M12 4v8" opacity=".5"/>',
+    rot3d: '<ellipse cx="12" cy="12" rx="9" ry="4"/><path d="M12 3v18" stroke-dasharray="2 2"/><path d="m18 9 3 3-3 3" opacity=".8"/>',
+    mir3d: '<path d="M12 2v20" stroke-dasharray="3 2"/><path d="M9 6 3 12l6 6z"/><path d="M15 6l6 6-6 6z" opacity=".5"/>',
+    arr3d: '<rect x="3" y="3" width="6" height="6"/><rect x="12" y="3" width="6" height="6" opacity=".7"/><rect x="3" y="12" width="6" height="6" opacity=".7"/><rect x="12" y="12" width="6" height="6" opacity=".45"/>',
+    mov3d: '<path d="M12 3v18M3 12h18"/><path d="m12 3 3 3M12 3 9 6M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3M12 21l3-3M12 21l-3-3"/>',
+    view3d: '<path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z"/><path d="M12 11.5 3.5 7M12 11.5 20.5 7M12 11.5v10" opacity=".55"/>',
+    orbit: '<circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10" ry="4.5"/><ellipse cx="12" cy="12" rx="10" ry="4.5" transform="rotate(60 12 12)" opacity=".5"/>',
+    vstyle: '<path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z"/><path d="M12 11.5 20.5 7v10L12 21.5z" fill="currentColor" stroke="none" opacity=".45"/>',
+    persp: '<path d="M2 20 9 6h6l7 14z"/><path d="M9 6 11 20M15 6l-2 14" opacity=".45"/>',
+    plan: '<rect x="4" y="4" width="16" height="16"/><path d="M4 10h16M10 4v16" opacity=".5"/>',
+    elev: '<path d="M4 20h16"/><path d="M12 17V4M8 8l4-4 4 4"/>',
+    facetres: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5 5.5 8v8l6.5 4.5 6.5-4.5V8z" opacity=".6"/>',
+    tosolid: '<path d="M4 6h7v7H4z" stroke-dasharray="2 2"/><path d="m13 11 7-4v9l-7 4z"/><path d="M13 11 6 15v5h7" opacity=".5"/>',
+    tomesh: '<path d="M3 8 12 3l9 5-9 5z"/><path d="M3 8v8l9 5 9-5V8" opacity=".55"/><path d="M7.5 5.5 16.5 10.5M16.5 5.5 7.5 10.5" opacity=".4"/>',
+    check: '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
+    export3d: '<path d="M12 3 4.5 7v9L12 20l7.5-4V7z" opacity=".55"/><path d="M12 8v8M9 13l3 3 3-3"/>',
+    import3d: '<path d="M12 3 4.5 7v9L12 20l7.5-4V7z" opacity=".55"/><path d="M12 16V8M9 11l3-3 3 3"/>',
+    zoomext: '<rect x="3" y="3" width="18" height="18" stroke-dasharray="3 2"/><path d="M8 12h8M12 8v8"/>',
+    /* --- CAM --- */
+    stock: '<path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7z" stroke-dasharray="3 2"/><path d="M12 11.5 3.5 7M12 11.5 20.5 7M12 11.5v10" opacity=".4"/>',
+    material: '<rect x="3" y="7" width="18" height="12" rx="1"/><path d="M3 11h18" opacity=".5"/><path d="M7 4h10" opacity=".6"/>',
+    camcontour: '<path d="M5 19V8l7-4 7 4v11" stroke-dasharray="3 2" opacity=".6"/><path d="M3 21h18"/><circle cx="5" cy="8" r="2"/>',
+    campocket: '<rect x="3" y="5" width="18" height="14"/><path d="M7 9h10v6H7z" stroke-dasharray="2 2"/><path d="M7 12h10" opacity=".5"/>',
+    camface: '<path d="M3 15h18"/><path d="M5 11h14M5 7h14" opacity=".45"/><circle cx="7" cy="15" r="2.4"/>',
+    camdrill: '<path d="M12 3v11"/><path d="m9 14 3 5 3-5z"/><path d="M4 21h16"/>',
+    camengrave: '<path d="m5 19 3-9 9-3-3 9z"/><path d="m8 10 6 6" opacity=".5"/><path d="M3 21h18" opacity=".6"/>',
+    camrough: '<path d="M3 18h18"/><path d="M5 14h14M7 10h10M9 6h6" opacity=".55"/><circle cx="5" cy="18" r="1.8"/>',
+    camfinish: '<path d="M3 17c5-8 13-8 18 0"/><path d="M3 20c5-8 13-8 18 0" opacity=".45"/><circle cx="8" cy="13.4" r="1.6"/>',
+    camlathe: '<path d="M3 12h18" stroke-dasharray="3 2"/><path d="M5 8h9l3 4-3 4H5z"/><path d="m19 15 2-3-2-3" opacity=".7"/>',
+    camturn: '<path d="M3 12h18" stroke-dasharray="3 2"/><ellipse cx="9" cy="12" rx="5" ry="6"/><path d="m21 8-5 4 5 4"/>',
+    camturnf: '<path d="M3 12h18" stroke-dasharray="3 2"/><ellipse cx="9" cy="12" rx="5" ry="6" opacity=".5"/><path d="M15 9 21 12l-6 3z"/>',
+    camfacing: '<path d="M3 12h18" stroke-dasharray="3 2"/><path d="M8 5v14"/><path d="m14 7-3 5 3 5" opacity=".8"/>',
+    camgroove: '<path d="M3 12h18" stroke-dasharray="3 2"/><path d="M4 7h16v10H4z" opacity=".5"/><path d="M11 7v4h2V7" fill="currentColor" stroke="none"/><path d="M11 7v4h2V7z"/>',
+    camthread: '<path d="M3 12h18" stroke-dasharray="3 2"/><path d="M5 8h14v8H5z" opacity=".4"/><path d="M6 8 8 16M10 8l2 8M14 8l2 8"/>',
+    camcutoff: '<path d="M3 12h18" stroke-dasharray="3 2"/><path d="M5 7h14v10H5z" opacity=".4"/><path d="M12 4v16" stroke-width="2.2"/>',
+    camlist: '<path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="1.6" opacity=".7"/>',
+    camdel: '<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>',
+    campost: '<rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M7 21h10M12 17v4"/><path d="M7 9h4M7 12h7" opacity=".65"/>',
+    camgen: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 16h4" opacity=".7"/>',
+    camsheet: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/><path d="M9 11h6M9 14h6M9 17h3" opacity=".75"/>',
+    camtools: '<path d="M12 3v9"/><path d="m9 12 3 6 3-6z"/><path d="M4 21h16" opacity=".6"/><circle cx="5" cy="6" r="2" opacity=".7"/><circle cx="19" cy="6" r="2" opacity=".7"/>',
+    camsim: '<path d="M4 18h16"/><path d="m7 14 3-5 3 3 4-6" stroke-dasharray="3 2"/><circle cx="7" cy="14" r="1.6"/>',
+    caments: '<path d="m4 17 4-7 4 4 4-8"/><circle cx="4" cy="17" r="1.4"/><circle cx="8" cy="10" r="1.4"/><circle cx="12" cy="14" r="1.4"/><circle cx="16" cy="6" r="1.4"/>'
   };
   function icon(name, cls) {
     var p = P[name] || P.point;
@@ -225,7 +298,7 @@
     },
     {
       id: 'anotar', label: 'Anotar', panels: [
-        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }, { cmd: 'ESCALATEXTO', icon: 'scale', title: 'Escalar' }, { cmd: 'JUSTIFICATEXTO', icon: 'align', title: 'Justificar' }]] },
+        { label: 'Texto', groups: [[{ cmd: 'TEXTOM', big: true, title: 'Texto múlt.' }], [{ cmd: 'TEXTO', big: true, title: 'Texto' }], [{ cmd: 'EDITTEXTO', title: 'Editar' }, { cmd: 'ESCALATEXTO', icon: 'scale', title: 'Escalar' }, { cmd: 'JUSTIFICATEXTO', icon: 'align', title: 'Justificar' }], [{ cmd: 'BUSCAR', icon: 'find', title: 'Buscar' }, { cmd: 'TEXTOALFRENTE', icon: 'order', title: 'Al frente' }]] },
         { label: 'Tablas', groups: [[{ cmd: 'TABLA', big: true }]] },
         {
           label: 'Cotas', groups: [
@@ -237,7 +310,7 @@
           ]
         },
         { label: 'Directrices', groups: [[{ cmd: 'DIRECTRIZ', big: true }]] },
-        { label: 'Edición', groups: [[{ cmd: 'ACOTARAPIDA', big: true, title: 'Cota rápida' }], [{ cmd: 'MARCACENTRO', big: true, title: 'M. centro' }], [{ cmd: 'ACOTAEDIC', icon: 'dimstyle', title: 'Editar cota' }, { cmd: 'ACOTATEDIC', icon: 'dimstyle', title: 'Mover texto' }]] },
+        { label: 'Edición', groups: [[{ cmd: 'ACOTARAPIDA', big: true, title: 'Cota rápida' }], [{ cmd: 'MARCACENTRO', big: true, title: 'M. centro' }], [{ cmd: 'ACOTAEDIC', icon: 'dimstyle', title: 'Editar cota' }, { cmd: 'ACOTATEDIC', icon: 'dimstyle', title: 'Mover texto' }, { cmd: 'ACOTASALTO', icon: 'dimrad', title: 'Salto' }]] },
         { label: 'Estilos', groups: [[{ cmd: 'ESTILOCOTA', big: true, title: 'Estilo cota' }], [{ cmd: 'ESTILO', big: true, title: 'Estilo texto' }], [{ cmd: 'ACTCOTA', title: 'Actualizar' }]] }
       ]
     },
@@ -250,7 +323,7 @@
             [{ cmd: 'ZOOM V', icon: 'zoomwin', title: 'Ventana' }, { cmd: 'ZOOM P', icon: 'zoomprev', title: 'Previo' }, { cmd: 'ZOOM T', icon: 'zoom', title: 'Todo' }]
           ]
         },
-        { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }]] },
+        { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }], [{ cmd: 'RECORRERCAPAS', icon: 'layer', title: 'Recorrer capas' }]] },
         { label: 'Coordenadas', groups: [[{ cmd: 'SCP', big: true }], [{ cmd: 'SCPGLOBAL', icon: 'ucs', title: 'SCP global' }, { cmd: 'VISTA', title: 'Vistas' }]] },
         { label: 'Visibilidad', groups: [[{ cmd: 'AISLAROBJETOS', big: true, title: 'Aislar' }], [{ cmd: 'OCULTAROBJETOS', big: true, icon: 'view', title: 'Ocultar' }], [{ cmd: 'FINAISLAR', icon: 'view', title: 'Mostrar todo' }]] },
         { label: 'Interfaz', groups: [[{ cmd: 'LIMPIAPANTALLA', title: 'Pantalla limpia' }, { cmd: 'REGEN' }, { cmd: 'OPCIONES' }]] }
@@ -280,6 +353,115 @@
         { label: 'Dibujo', groups: [[{ cmd: 'LIMPIA', big: true }], [{ cmd: 'UNIDADES', big: true }], [{ cmd: 'AUDITORIA', icon: 'audit', title: 'Auditoría' }, { cmd: 'RENOMBRA', icon: 'textedit', title: 'Renombrar' }, { cmd: 'PLANTILLA', title: 'Plantilla' }]] },
         { label: 'Consulta', groups: [[{ cmd: 'ESTADO', icon: 'list', title: 'Estado' }, { cmd: 'TIEMPO', icon: 'clock', title: 'Tiempo' }, { cmd: 'CARGAPAT', icon: 'hatch', title: 'Cargar .pat' }], [{ cmd: 'CALCRAPIDA', title: 'Calculadora' }, { cmd: 'DEPURAR', title: 'Depurar' }, { cmd: 'PUNTOBASE', icon: 'point', title: 'Punto base' }]] },
         { label: 'Parámetros', groups: [[{ cmd: 'OPCIONES', big: true }], [{ cmd: 'PARAMDIB', title: 'Param. dibujo' }, { cmd: 'REFENT', title: 'Referencias' }, { cmd: 'MODIVAR', title: 'Variables' }]] }
+      ]
+    },
+    {
+      id: 'modelado', label: 'Modelado 3D', panels: [
+        {
+          label: 'Primitivas', groups: [
+            [{ cmd: 'PRISMARECT', big: true, title: 'Prisma' }],
+            [{ cmd: 'CILINDRO', big: true }],
+            [{ cmd: 'ESFERA' }, { cmd: 'CONO' }, { cmd: 'TOROIDE' }],
+            [{ cmd: 'CUNA', title: 'Cuña' }, { cmd: 'PIRAMIDE' }, { cmd: 'ELEV', title: 'Elevación' }]
+          ]
+        },
+        {
+          label: 'Crear', groups: [
+            [{ cmd: 'EXTRUSION', big: true }],
+            [{ cmd: 'REVOLUCION', big: true }],
+            [{ cmd: 'BARRIDO' }, { cmd: 'SOLEVADO' }, { cmd: 'PULSARTIRAR', title: 'Pulsar/tirar' }],
+            [{ cmd: 'TALADRO', icon: 'hole', big: true, title: 'Taladro' }],
+            [{ cmd: 'SALIENTE', title: 'Saliente' }, { cmd: 'PLANOTRABAJO', icon: 'plane', title: 'Plano de trabajo' }]
+          ]
+        },
+        {
+          label: 'Superficies y mallas', groups: [
+            [{ cmd: 'SUPERFICIEREGLA', big: true, title: 'Reglada' }],
+            [{ cmd: 'SUPERFICIEARISTA', big: true, title: 'De arista' }],
+            [{ cmd: 'SUPERFICIETAB', title: 'Tabulada' }, { cmd: 'SUPERFICIEREVOL', title: 'De revolución' }, { cmd: 'SUPERFICIEPLANA', title: 'Plana' }],
+            [{ cmd: 'MALLA', title: 'Primitiva de malla' }, { cmd: 'APLANAROBJETOS', title: 'Aplanar' }, { cmd: 'VISTAS2D', title: 'Tres vistas' }]
+          ]
+        },
+        {
+          label: 'Booleanos', groups: [
+            [{ cmd: 'UNION3D', big: true, title: 'Unión' }],
+            [{ cmd: 'DIFERENCIA3D', big: true, title: 'Diferencia' }],
+            [{ cmd: 'INTERSEC3D', title: 'Intersecar' }, { cmd: 'INTERF', title: 'Interferencia' }, { cmd: 'CORTE', title: 'Cortar' }]
+          ]
+        },
+        {
+          label: 'Editar sólido', groups: [
+            [{ cmd: 'DESPLAZA3D', title: 'Desplazar' }, { cmd: 'GIRA3D', title: 'Girar' }, { cmd: 'SIMETRIA3D', title: 'Simetría' }],
+            [{ cmd: 'MATRIZ3D', title: 'Matriz' }, { cmd: 'ALINEAR3D', title: 'Alinear' }, { cmd: 'ENGROSAR' }],
+            [{ cmd: 'SECCION3D', title: 'Sección' }, { cmd: 'SOLPERFIL', title: 'Perfil plano' }, { cmd: 'SUAVIZARMALLA', title: 'Suavizar' }],
+            [{ cmd: 'ARBOL', icon: 'tree', title: 'Árbol de operaciones' }, { cmd: 'PROPFIS', title: 'Prop. físicas' }, { cmd: 'COMPROBARSOLIDO', title: 'Comprobar' }],
+            [{ cmd: 'FACETRES', title: 'Resolución' }],
+            [{ cmd: 'CONVERTIRENSOLIDO', title: 'A sólido' }, { cmd: 'CONVERTIRENMALLA', title: 'A malla' }]
+          ]
+        },
+        {
+          label: 'Vista', groups: [
+            [{ cmd: 'ORBITA', big: true, title: 'Órbita' }],
+            [{ cmd: 'ESTILOVISUAL', big: true, title: 'Estilo visual',
+               menu: ['ESTILOVISUAL ESTRUCTURA|Estructura alámbrica', 'ESTILOVISUAL OCULTA|Oculto',
+                      'ESTILOVISUAL SOMBREADO|Sombreado', 'ESTILOVISUAL ARISTASSOMBRA|Sombreado con aristas',
+                      'ESTILOVISUAL CONCEPTUAL|Conceptual', 'ESTILOVISUAL REALISTA|Realista',
+                      'ESTILOVISUAL GRISES|Tonos de gris', 'ESTILOVISUAL BOCETO|Boceto',
+                      'ESTILOVISUAL RAYOSX|Rayos X'] }],
+            [{ cmd: 'SWISO', title: 'Iso SO' }, { cmd: 'SEISO', title: 'Iso SE' }, { cmd: 'NEISO', title: 'Iso NE' }],
+            [{ cmd: 'SUPERIOR' }, { cmd: 'FRONTAL' }, { cmd: 'DERECHA' }],
+            [{ cmd: 'PERSPECTIVA' }, { cmd: 'ZOOM3D', title: 'Zoom ext.' }, { cmd: 'PLANTA2D', title: 'Volver a 2D' }]
+          ]
+        },
+        {
+          label: 'Intercambio', groups: [
+            [{ cmd: 'EXPORTA3D', big: true, title: 'Exportar 3D',
+               menu: ['EXPORTA3D STL|STL (impresión 3D)', 'EXPORTA3D OBJ|Wavefront OBJ',
+                      'EXPORTA3D PLY|Stanford PLY', 'EXPORTA3D 3MF|3MF', 'EXPORTA3D GLTF|glTF 2.0',
+                      'EXPORTA3D GLB|glTF binario', 'EXPORTA3D OFF|OFF', 'EXPORTA3D AMF|AMF',
+                      'EXPORTA3D VRML|VRML', 'EXPORTA3D X3D|X3D'] }],
+            [{ cmd: 'IMPORTA3D', big: true, title: 'Importar 3D' }]
+          ]
+        }
+      ]
+    },
+    {
+      id: 'cam', label: 'Fabricación', panels: [
+        {
+          label: 'Preparación', groups: [
+            [{ cmd: 'CAMBRUTO', big: true, title: 'Bruto' }],
+            [{ cmd: 'CAMHERRAMIENTAS', big: true, title: 'Herramientas' }],
+            [{ cmd: 'CAMMATERIAL', title: 'Material' }, { cmd: 'CAMCONTROL', title: 'Control CN' }]
+          ]
+        },
+        {
+          label: 'Fresado 2.5D', groups: [
+            [{ cmd: 'CAMCONTORNO', big: true, title: 'Contorneado' }],
+            [{ cmd: 'CAMVACIADO', big: true, title: 'Vaciado' }],
+            [{ cmd: 'CAMTALADRO', big: true, title: 'Taladrado' }],
+            [{ cmd: 'CAMPLANEADO', title: 'Planeado' }, { cmd: 'CAMGRABADO', title: 'Grabado' }]
+          ]
+        },
+        {
+          label: 'Fresado 3D', groups: [
+            [{ cmd: 'CAMDESBASTE', big: true, title: 'Desbaste' }],
+            [{ cmd: 'CAMACABADO', big: true, title: 'Acabado' }]
+          ]
+        },
+        {
+          label: 'Torneado', groups: [
+            [{ cmd: 'CAMPERFILTORNO', big: true, title: 'Perfil' }],
+            [{ cmd: 'CAMCILINDRAR', title: 'Cilindrar' }, { cmd: 'CAMACABADOTORNO', title: 'Acabar' }, { cmd: 'CAMREFRENTAR', title: 'Refrentar' }],
+            [{ cmd: 'CAMRANURAR', title: 'Ranurar' }, { cmd: 'CAMROSCAR', title: 'Roscar' }, { cmd: 'CAMTRONZAR', title: 'Tronzar' }]
+          ]
+        },
+        {
+          label: 'Salida CN', groups: [
+            [{ cmd: 'CAMGENERAR', big: true, title: 'Generar CN' }],
+            [{ cmd: 'CAMLISTA', title: 'Operaciones' }, { cmd: 'CAMSIMULAR', title: 'Ver trayect.' }, { cmd: 'CAMHOJA', title: 'Hoja prep.' }],
+            [{ cmd: 'CAMAENTIDADES', title: 'A entidades' }, { cmd: 'CAMBORRAOP', title: 'Borrar op.' }]
+          ]
+        }
       ]
     },
     {
@@ -538,7 +720,10 @@
 
   UI.prototype.setCoords = function (p) {
     var pr = Math.min(4, this.app.doc.vars.LUPREC);
-    this.el.coords.textContent = G.fmt(p.x, pr) + ', ' + G.fmt(p.y, pr) + ', ' + G.fmt(0, pr);
+    /* la cota Z se muestra de verdad: en 3D era siempre 0 y no había
+       forma de saber a qué altura estaba el punto capturado */
+    var z = (p && typeof p.z === 'number' && isFinite(p.z)) ? p.z : 0;
+    this.el.coords.textContent = G.fmt(p.x, pr) + ', ' + G.fmt(p.y, pr) + ', ' + G.fmt(z, pr);
   };
 
   UI.prototype.toggleCleanScreen = function () {
@@ -674,6 +859,11 @@
     });
     inp.addEventListener('input', function () {
       var v = inp.value;
+      /* El autocompletado sólo actúa en la petición "Comando:".  Dentro
+         de un comando lo que se teclea es un dato u una opción —CEN, MID,
+         @50,0— y sustituirlo por el nombre de otro comando destroza la
+         entrada, que es lo que pasaba al forzar una referencia. */
+      if (app.pending) { self.hideAC(); return; }
       if (!v || app.expectingText() || /[ ,<@]/.test(v)) { self.hideAC(); return; }
       self.acItems = Cmd.suggest(v);
       self.acIndex = self.acItems.length ? 0 : -1;
@@ -719,7 +909,10 @@
   UI.prototype.updateDyn = function () {
     var app = this.app, doc = app.doc;
     var d = this.el.dynin;
-    if (!doc.vars.DYNMODE || !app.cursorScreen || app.cleanScreenHideDyn) { d.hidden = true; return; }
+    /* En el espacio 3D la entrada dinámica plana no tiene sentido: el
+       punto se lee en la barra de estado con sus tres coordenadas y el
+       rótulo de la captura dice a qué se está enganchando. */
+    if (!doc.vars.DYNMODE || !app.cursorScreen || app.cleanScreenHideDyn || app.is3D) { d.hidden = true; return; }
     var p = app.pending;
     var wrapRect = document.getElementById('canvasWrap').getBoundingClientRect();
     d.hidden = false;
@@ -727,16 +920,26 @@
     d.style.top = Math.min(wrapRect.height - 70, app.cursorScreen.y + 16) + 'px';
     var pr = Math.min(4, doc.vars.LUPREC);
     var w = app.cursorWorld || { x: 0, y: 0 };
+    /* Un campo que el usuario está tecleando o que ha bloqueado con Tab
+       no se refresca con el cursor, igual que en AutoCAD. */
+    var lock = app.dynLock || {};
+    var act = document.activeElement;
+    function held(el, id) {
+      return (lock[id] !== undefined && lock[id] !== '') || (act === el && app.dynTyping);
+    }
+    var hA = held(this.el.dynA, 'dynA'), hB = held(this.el.dynB, 'dynB');
     if (p && p.kind === 'point' && p.opts.base) {
       var dist = G.dist(p.opts.base, w), ang = G.deg(G.na(G.ang(p.opts.base, w)));
-      this.el.dynA.value = G.fmt(dist, pr);
-      this.el.dynB.value = G.fmt(ang, 0);
+      if (!hA) this.el.dynA.value = G.fmt(dist, pr);
+      if (!hB) this.el.dynB.value = G.fmt(ang, 0);
       this.el.dynSep.textContent = '<';
     } else {
-      this.el.dynA.value = G.fmt(w.x, pr);
-      this.el.dynB.value = G.fmt(w.y, pr);
+      if (!hA) this.el.dynA.value = G.fmt(w.x, pr);
+      if (!hB) this.el.dynB.value = G.fmt(w.y, pr);
       this.el.dynSep.textContent = ',';
     }
+    this.el.dynA.classList.toggle('locked', !!(lock.dynA !== undefined && lock.dynA !== ''));
+    this.el.dynB.classList.toggle('locked', !!(lock.dynB !== undefined && lock.dynB !== ''));
     var tipText = p ? p.text : 'Comando:';
     this.el.dynTip.textContent = tipText;
     this.el.dynTip.hidden = !tipText;
@@ -1181,6 +1384,80 @@
         return v.replace(/%%d/gi, '°').replace(/%%c/gi, 'Ø').replace(/%%p/gi, '±');
       }
     });
+  };
+
+  /* ---------- Visor de texto (código CN, hojas de preparación) ---------- */
+  UI.prototype.textViewer = function (title, text) {
+    var pre = document.createElement('pre');
+    pre.className = 'txtview';
+    pre.textContent = text;
+    pre.style.cssText = 'max-height:62vh;overflow:auto;margin:0;padding:10px 12px;' +
+      'font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;white-space:pre;' +
+      'background:#14181f;color:#cfd8e6;border-radius:5px;border:1px solid #2a3140';
+    var n = text.split('\n').length;
+    return this.dialog({
+      title: title + '   (' + n + ' líneas)', width: 760, body: pre,
+      buttons: [{ label: 'Copiar al portapapeles', value: 'copy' },
+                { label: 'Cerrar', value: null, primary: true }],
+      enterOk: false,
+      onOk: function (b, v) {
+        if (v !== 'copy') return v;
+        try {
+          if (navigator.clipboard) navigator.clipboard.writeText(text);
+          else {
+            var ta = document.createElement('textarea');
+            ta.value = text; document.body.appendChild(ta);
+            ta.select(); document.execCommand('copy'); ta.remove();
+          }
+          var btn = b.parentNode.querySelector('.dlg-foot button');
+          if (btn) { btn.textContent = 'Copiado ✓'; setTimeout(function () { btn.textContent = 'Copiar al portapapeles'; }, 1400); }
+        } catch (err) { }
+        return false;    /* no cierra */
+      }
+    });
+  };
+
+  /* ---------- Selector de archivo genérico ---------- */
+  UI.prototype.pickFile = function (accept) {
+    return new Promise(function (resolve) {
+      var inp = document.createElement('input');
+      inp.type = 'file';
+      if (accept) inp.accept = accept;
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+      var done = false;
+      inp.addEventListener('change', function () {
+        if (done) return;
+        done = true;
+        var f = inp.files && inp.files[0];
+        inp.remove();
+        resolve(f || null);
+      });
+      window.addEventListener('focus', function once() {
+        window.removeEventListener('focus', once);
+        setTimeout(function () { if (!done) { done = true; inp.remove(); resolve(null); } }, 700);
+      });
+      inp.click();
+    });
+  };
+
+  /* ---------- Indicador 3D en la barra de estado ---------- */
+  UI.prototype.setStatus3D = function (on) {
+    var el = document.getElementById('st3d');
+    if (el) el.classList.toggle('on', !!on);
+    /* Al entrar en el espacio 3D la cinta pasa a las herramientas de
+       modelado, y al salir vuelve a la pestaña que estaba.  Es lo que
+       hace SolidWorks al cambiar de entorno. */
+    if (on) {
+      if (this.activeTab !== 'modelado') {
+        this.tab2d = this.activeTab;
+        this.activeTab = 'modelado';
+        this.buildRibbon();
+      }
+    } else if (this.activeTab === 'modelado') {
+      this.activeTab = this.tab2d || 'inicio';
+      this.buildRibbon();
+    }
   };
 
   UI.prototype.listDialog = function (title, items, current) {
@@ -1907,6 +2184,132 @@
   };
 
   /* ------------------------------------------------------------
+     Árbol de operaciones
+
+     Es la pieza que hace paramétrico el modelado: lista las piezas del
+     documento y, dentro de cada una, el árbol de operaciones con sus
+     medidas.  Cambiar una medida reconstruye el sólido; se puede
+     suprimir y restituir una operación sin perderla.
+     ------------------------------------------------------------ */
+  UI.prototype.renderTree = function () {
+    var p = this.el.palettes;
+    if (!p.classList.contains('open')) return;
+    var self = this, app = this.app, doc = app.doc;
+    var S = CAD.Solid;
+    var piezas = (doc.visible ? doc.visible() : doc.entities).filter(function (e) { return S.is3D(e); });
+    var head = '<div class="palette"><div class="palette-head"><span>Árbol de operaciones</span>' +
+      '<button id="palClose" title="Cerrar" aria-label="Cerrar paleta">✕</button></div><div class="palette-body tree-body">';
+    var html = head;
+    if (!piezas.length) {
+      html += '<div class="prop-empty">El documento no tiene sólidos.<br><br>' +
+              'Cree uno con PRISMARECT, CILINDRO, EXTRUSION, REVOLUCION…</div>';
+    } else {
+      piezas.forEach(function (ent, ip) {
+        var mesh = S.meshOf(ent);
+        var sel = app.selSet.indexOf(ent) >= 0;
+        var vol = mesh ? Math.abs(mesh.volume()) : 0;
+        html += '<div class="tree-part' + (sel ? ' sel' : '') + '" data-part="' + ip + '">';
+        html += '<div class="tree-part-head" data-pick="' + ip + '">' +
+                '<span class="tree-ico">◧</span><b>' + esc(S.opName(ent.hist)) + ' ' + (ip + 1) + '</b>' +
+                '<span class="tree-vol">' + G.fmt(vol, 2) + ' mm³</span></div>';
+        var nodos = S.featureTree(ent);
+        nodos.forEach(function (n, ix) {
+          if (!n.ruta.length && nodos.length > 1) return;      /* la raíz ya es la cabecera */
+          var sup = nodeSuppressed(ent, n.ruta);
+          html += '<div class="tree-node' + (sup ? ' sup' : '') + '" style="padding-left:' +
+                  (10 + n.nivel * 14) + 'px" data-part="' + ip + '" data-ruta="' + n.ruta.join('.') + '">';
+          html += '<span class="tree-tog" title="Suprimir o restituir">' + (sup ? '○' : '●') + '</span>';
+          html += '<span class="tree-name">' + esc(n.nombre) + '</span>';
+          if (n.params.length) {
+            html += '<div class="tree-params">';
+            n.params.forEach(function (q) {
+              html += '<label>' + esc(q.label) +
+                '<input type="number" step="any" value="' + G.fmt(q.value, 4) +
+                '" data-part="' + ip + '" data-ruta="' + n.ruta.join('.') + '" data-key="' + q.key + '"></label>';
+            });
+            html += '</div>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+      });
+    }
+    html += '</div></div>';
+    p.innerHTML = html;
+
+    function nodeSuppressed(ent, ruta) {
+      if (!ruta.length) return false;
+      var padre = ent.hist;
+      for (var i = 0; i < ruta.length - 1; i++) {
+        if (!padre || padre.op !== 'bool') return false;
+        padre = padre.nodes[ruta[i]].hist;
+      }
+      if (!padre || padre.op !== 'bool' || !padre.nodes) return false;
+      return !!padre.nodes[ruta[ruta.length - 1]].suprimido;
+    }
+    function piezaDe(i) { return piezas[+i]; }
+
+    var close = p.querySelector('#palClose');
+    if (close) close.addEventListener('click', function () { self.togglePalette('arbol', false); });
+
+    /* designar la pieza al pulsar su cabecera */
+    p.querySelectorAll('[data-pick]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var e = piezaDe(el.dataset.pick);
+        if (!e) return;
+        app.selSet = [e];
+        app.v3dDirty && app.v3dDirty();
+        app.refresh();
+        self.renderTree();
+      });
+    });
+
+    /* suprimir o restituir una operación */
+    p.querySelectorAll('.tree-tog').forEach(function (el) {
+      el.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var nd = el.closest('.tree-node');
+        var e = piezaDe(nd.dataset.part);
+        if (!e || !nd.dataset.ruta) return;
+        var ruta = nd.dataset.ruta.split('.').filter(function (x) { return x !== ''; }).map(Number);
+        doc.mark('SUPRIMIR OPERACIÓN');
+        CAD.Solid.toggleNode(e, ruta, doc);
+        app.refresh(true);
+        self.renderTree();
+      });
+    });
+
+    /* editar una medida: el sólido se reconstruye al salir del campo */
+    p.querySelectorAll('.tree-params input').forEach(function (inp) {
+      function aplica() {
+        var e = piezaDe(inp.dataset.part);
+        if (!e) return;
+        var v = parseFloat(inp.value);
+        if (!isFinite(v)) return;
+        var ruta = inp.dataset.ruta.split('.').filter(function (x) { return x !== ''; }).map(Number);
+        var antes = CAD.Solid.histAt(e, ruta);
+        if (!antes || antes[inp.dataset.key] === v) return;
+        doc.mark('EDITAR OPERACIÓN');
+        CAD.Solid.setParam(e, ruta, inp.dataset.key, v, doc);
+        var m = CAD.Solid.meshOf(e);
+        if (!m || !m.faces.length) {
+          /* el cambio deja la pieza vacía: se deshace */
+          CAD.Solid.setParam(e, ruta, inp.dataset.key, antes[inp.dataset.key], doc);
+          app.out('Ese valor deja la pieza vacía; se ha conservado el anterior.', 'warn');
+          inp.value = G.fmt(antes[inp.dataset.key], 4);
+        }
+        app.refresh(true);
+        self.renderTree();
+      }
+      inp.addEventListener('change', aplica);
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); aplica(); }
+        e.stopPropagation();
+      });
+    });
+  };
+
+  /* ------------------------------------------------------------
      Paleta de propiedades
      ------------------------------------------------------------ */
   UI.prototype.togglePalette = function (name, show) {
@@ -1916,6 +2319,7 @@
     this.paletteKind = name || 'props';
     p.classList.toggle('open', open);
     if (open && this.paletteKind === 'blocks') this.renderBlocks();
+    else if (open && this.paletteKind === 'arbol') this.renderTree();
     else this.renderProps();
     var app = this.app;
     setTimeout(function () { app.resize(); }, 10);
@@ -1932,6 +2336,7 @@
     var p = this.el.palettes;
     if (!p.classList.contains('open')) return;
     if (this.paletteKind === 'blocks') return;
+    if (this.paletteKind === 'arbol') { this.renderTree(); return; }
     var self = this, app = this.app, doc = app.doc;
     var sel = app.selSet;
     var head = '<div class="palette"><div class="palette-head"><span>Propiedades</span>' +

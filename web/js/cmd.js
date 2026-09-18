@@ -67,61 +67,171 @@
   CAD.num = num;
 
   /* Devuelve {p} | {dist} | null */
+  /* ------------------------------------------------------------
+     Con un plano de trabajo activo, lo que se teclea son coordenadas
+     DEL PLANO, igual que un croquis de SolidWorks o que el SCP de
+     AutoCAD.  Con el prefijo * se escriben en coordenadas del mundo.
+     ------------------------------------------------------------ */
   CAD.parsePoint = function (txt, app, base, dir) {
+    var pl = (CAD.WPlane && app && app.doc) ? CAD.WPlane.get(app.doc) : null;
+    if (!pl || String(txt).trim()[0] === '*') return parsePointRaw(txt, app, base, dir);
+
+    var W = CAD.WPlane, G3 = CAD.G3;
+    /* la base se lleva a coordenadas del plano para que @ sea relativo
+       dentro del propio plano */
+    var baseP = base ? W.toPlane(pl, G3.v(base.x, base.y, base.z || 0)) : null;
+    var lastP = app.lastPoint ? W.toPlane(pl, G3.v(app.lastPoint.x, app.lastPoint.y, app.lastPoint.z || 0)) : null;
+    var falso = {
+      doc: app.doc, lastPoint: lastP ? { x: lastP.u, y: lastP.v, z: lastP.w } : null,
+      ignoreUCS: true, cursorWorld: app.cursorWorld
+    };
+    var r = parsePointRaw(txt, falso, baseP ? { x: baseP.u, y: baseP.v, z: baseP.w } : null, dir);
+    if (!r || !r.p) return r;
+    var w = W.toWorld(pl, r.p.x, r.p.y);
+    if (r.p.z) { w = G3.add(w, G3.mul(G3.v(pl.n.x, pl.n.y, pl.n.z), r.p.z)); }
+    return { p: { x: w.x, y: w.y, z: w.z } };
+  };
+
+  function parsePointRaw(txt, app, base, dir) {
     var s = String(txt).trim();
     if (!s) return null;
     var rel = false, wcs = false;
     if (s[0] === '@') { rel = true; s = s.slice(1); }
     if (s[0] === '*') { wcs = true; s = s.slice(1); }
     var last = base || app.lastPoint || { x: 0, y: 0 };
+    /* "@" a secas es el último punto, como en AutoCAD */
+    if (rel && !s) {
+      return { p: { x: last.x, y: last.y,
+                    z: last.z !== undefined ? last.z : ((app.doc && app.doc.vars.ELEVATION) || 0) } };
+    }
     var doc = app.doc;
     var ucs = (CAD.UCS && doc && !wcs) ? CAD.UCS : null;
     var ub = (ucs && !app.ignoreUCS) ? (doc.vars.UCSANG || 0) : 0;
 
-    /* polar: d<a */
-    var m = s.match(/^([-+0-9.,eE]+)\s*<\s*([-+0-9.,eE]+)$/);
+    var elev = (doc && doc.vars.ELEVATION) || 0;
+    var lastZ = (base && base.z !== undefined) ? base.z
+              : (app.lastPoint && app.lastPoint.z !== undefined ? app.lastPoint.z : elev);
+
+    /* esférica: d<a<b  (distancia, ángulo en XY, ángulo sobre XY) */
+    var ms = s.match(/^([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)$/);
+    if (ms) {
+      var dd2 = num(ms[1]), a2 = G.rad(num(ms[2])) + ub, b2 = G.rad(num(ms[3]));
+      if (isNaN(dd2) || isNaN(a2) || isNaN(b2)) return null;
+      var o2 = rel ? last : (ucs && !app.ignoreUCS ? ucs.u2w(doc, { x: 0, y: 0 }) : { x: 0, y: 0 });
+      var rxy = dd2 * Math.cos(b2);
+      return { p: { x: o2.x + rxy * Math.cos(a2), y: o2.y + rxy * Math.sin(a2),
+                    z: (rel ? lastZ : 0) + dd2 * Math.sin(b2) } };
+    }
+    /* polar y cilíndrica: d<a  ó  d<a,z */
+    var m = s.match(/^([-+0-9.eE]+)\s*<\s*([-+0-9.eE]+)(?:\s*,\s*([-+0-9.eE]+))?$/);
     if (m) {
       var d = num(m[1]), a = num(m[2]);
       if (isNaN(d) || isNaN(a)) return null;
       var o = rel ? last : (ucs && !app.ignoreUCS ? ucs.u2w(doc, { x: 0, y: 0 }) : { x: 0, y: 0 });
-      return { p: G.polar(o, G.rad(a) + ub, d) };
+      var pp = G.polar(o, G.rad(a) + ub, d);
+      if (m[3] !== undefined) {
+        var zc = num(m[3]);
+        if (!isNaN(zc)) pp.z = rel ? lastZ + zc : zc;
+      } else if (rel) pp.z = lastZ;
+      return { p: pp };
     }
-    /* cartesiano x,y */
+    /* cartesiano x,y  ó  x,y,z */
     var parts = s.split(/[;]|,(?=\s*[-+.\d])/);
     if (parts.length >= 2) {
       var x = num(parts[0]), y = num(parts[1]);
+      var z = parts.length >= 3 ? num(parts[2]) : NaN;
       if (!isNaN(x) && !isNaN(y)) {
+        var q;
         if (rel) {
           var v = (ucs && !app.ignoreUCS) ? ucs.vec2w(doc, { x: x, y: y }) : { x: x, y: y };
-          return { p: { x: last.x + v.x, y: last.y + v.y } };
+          q = { x: last.x + v.x, y: last.y + v.y };
+          q.z = isNaN(z) ? lastZ : lastZ + z;
+        } else {
+          q = (ucs && !app.ignoreUCS) ? ucs.u2w(doc, { x: x, y: y }) : { x: x, y: y };
+          if (!isNaN(z)) q.z = z;
         }
-        return { p: (ucs && !app.ignoreUCS) ? ucs.u2w(doc, { x: x, y: y }) : { x: x, y: y } };
+        return { p: q };
       }
     }
     /* distancia directa */
     var dd = num(s);
     if (!isNaN(dd)) return { dist: dd };
     return null;
-  };
+  }
+  CAD.parsePointRaw = parsePointRaw;
 
+  /* Forma abreviada de una opción, como la escribe AutoCAD: las letras
+     en mayúscula, más las cifras que van delante ("2P" -> 2P,
+     "3puntos" -> 3, "ambos Lados" -> AL).  Antes las cifras se
+     descartaban y "2P" y "3P" acababan siendo la misma opción, de modo
+     que teclear 2P o 3P cancelaba el comando en lugar de elegirla. */
   function kwShort(k) {
-    var up = k.replace(/[^A-ZÁÉÍÓÚÑ]/g, '');
-    return up || k[0].toUpperCase();
+    var out = '', vistaMin = false;
+    for (var i = 0; i < k.length; i++) {
+      var c = k[i];
+      if (c >= '0' && c <= '9') { if (!vistaMin) out += c; continue; }
+      if (/[A-ZÁÉÍÓÚÑ]/.test(c)) { out += c; continue; }
+      if (/[a-záéíóúñ]/.test(c)) vistaMin = true;
+    }
+    return out || k[0].toUpperCase();
   }
   CAD.kwShort = kwShort;
 
+  /* Reconoce una opción escrita de tres formas, como AutoCAD:
+       - por sus mayúsculas ("aL" de "ambos Lados")
+       - por el principio del nombre ("amb")
+       - por el nombre completo tal como se muestra ("ambos Lados"),
+         ignorando espacios, acentos y puntuación en ambos lados. */
+  function norm(x) {
+    return String(x).toUpperCase()
+      .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+      .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
+      .replace(/[^A-Z0-9]/g, '');
+  }
+  /* ============================================================
+     Sustituciones de referencia a objetos tecleadas
+     En AutoCAD, en cualquier petición de punto se puede escribir el
+     código de tres letras para forzar una referencia sólo en esa
+     captura: END, MID, CEN, INT, PER, TAN, CUA…  Además están FROM
+     (desde un punto de partida), M2P (medio entre dos puntos), TT
+     (punto de rastreo temporal) y NON (sin referencia).
+     ============================================================ */
+  var OSNAP_WORDS = {
+    END: 'end', FIN: 'end', ENDP: 'end', PUNTOFINAL: 'end',
+    MID: 'mid', MED: 'mid', PUNTOMEDIO: 'mid',
+    CEN: 'cen', CENTRO: 'cen', CENTER: 'cen',
+    GCE: 'geo', CENTROGEOMETRICO: 'geo',
+    NOD: 'nod', PUN: 'nod', NODE: 'nod', NODO: 'nod',
+    QUA: 'qua', CUA: 'qua', QUAD: 'qua', CUADRANTE: 'qua',
+    INT: 'int', INTERSECCION: 'int', INTERSECTION: 'int',
+    APP: 'app', APPINT: 'app', FIC: 'app',
+    EXT: 'ext', EXTENSION: 'ext',
+    INS: 'ins', INSERCION: 'ins', INSERT: 'ins',
+    PER: 'per', PERPENDICULAR: 'per',
+    TAN: 'tan', TANGENTE: 'tan', TANGENT: 'tan',
+    NEA: 'nea', CER: 'nea', NEAR: 'nea', CERCANO: 'nea',
+    PAR: 'par', PARALELO: 'par', PARALLEL: 'par',
+    NON: 'none', NONE: 'none', NIN: 'none', NINGUNO: 'none'
+  };
+  var OSNAP_SPECIAL = { M2P: 'm2p', MTP: 'm2p', FRO: 'from', FROM: 'from',
+                        DE: 'from', DESDE: 'from', TT: 'track', RT: 'track' };
+  CAD.OSNAP_WORDS = OSNAP_WORDS;
+  CAD.OSNAP_SPECIAL = OSNAP_SPECIAL;
+
   function matchKeyword(txt, kws) {
     if (!kws || !kws.length) return null;
-    var t = String(txt).trim().toUpperCase();
+    var raw = String(txt).trim().toUpperCase();
+    var t = norm(txt);
     if (!t) return null;
-    for (var i = 0; i < kws.length; i++) {
-      if (kwShort(kws[i]).toUpperCase() === t) return kws[i];
+    var i;
+    for (i = 0; i < kws.length; i++) if (norm(kwShort(kws[i])) === t) return kws[i];
+    for (i = 0; i < kws.length; i++) if (norm(kws[i]) === t) return kws[i];
+    var hit = null, many = false;
+    for (i = 0; i < kws.length; i++) {
+      if (norm(kws[i]).indexOf(t) === 0) { if (hit) many = true; else hit = kws[i]; }
     }
-    for (var j = 0; j < kws.length; j++) {
-      var full = kws[j].toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ0-9]/g, '');
-      if (full === t || full.indexOf(t) === 0) return kws[j];
-    }
-    return null;
+    if (hit && !many) return hit;
+    return hit;      /* con varias coincidencias se queda con la primera */
   }
   CAD.matchKeyword = matchKeyword;
 
@@ -133,18 +243,46 @@
     this.doc = app.doc;
     this.def = def;
     this.name = def ? def.name : '';
+    this._seen = [];
   }
+
+  /* Todo objeto que el motor entrega al comando queda anotado: si ya hay
+     transacción abierta se guarda su estado, y si no, se guardará al abrirla. */
+  Ctx.prototype._see = function (list) {
+    if (!list) return list;
+    var arr = Array.isArray(list) ? list : [list];
+    if (this.doc._tx) this.doc.touchAll(arr);
+    else {
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] && this._seen.indexOf(arr[i]) < 0) this._seen.push(arr[i]);
+      }
+    }
+    return list;
+  };
   CAD.Ctx = Ctx;
 
   Ctx.prototype.out = function (s, cls) { this.app.out(s, cls); };
   Ctx.prototype.err = function (s) { this.app.out(s, 'err'); };
 
+  function fmtDef(d) {
+    if (d && typeof d === 'object') {
+      if (d.x !== undefined && d.y !== undefined) {
+        return G.fmt(d.x, 4) + ',' + G.fmt(d.y, 4) + (d.z ? ',' + G.fmt(d.z, 4) : '');
+      }
+      return '';
+    }
+    return String(d);
+  }
   function buildPrompt(msg, opts) {
     var s = msg;
     if (opts && opts.keywords && opts.keywords.length) s += ' [' + opts.keywords.join('/') + ']';
-    if (opts && opts.def !== undefined && opts.def !== null && opts.def !== '') s += ' <' + opts.def + '>';
+    if (opts && opts.def !== undefined && opts.def !== null && opts.def !== '') {
+      var d = fmtDef(opts.def);
+      if (d) s += ' <' + d + '>';
+    }
     return s + ': ';
   }
+  CAD.fmtDef = fmtDef;
 
   Ctx.prototype._ask = function (kind, msg, opts) {
     var app = this.app;
@@ -186,16 +324,32 @@
   Ctx.prototype.getSelection = function (msg, opts) {
     opts = opts || {};
     var app = this.app;
+    var self = this;
     if (!opts.force && app.selSet.length) {
       var s = app.selSet.slice();
       this.out(s.length + ' encontrado(s)');
-      return Promise.resolve(s);
+      return Promise.resolve(this._see(s));
     }
-    return this._ask('select', msg || 'Designe objetos', opts);
+    return this._ask('select', msg || 'Designe objetos', opts).then(function (r) { return self._see(r); });
   };
   /* --- Un solo objeto --- */
   Ctx.prototype.getEntity = function (msg, opts) {
-    return this._ask('entity', msg, opts || {});
+    var self = this;
+    opts = opts || {};
+    /* Objeto entregado por un doble clic: el comando lo toma sin volver
+       a preguntar, igual que hace AutoCAD (DBLCLKEDIT). */
+    var pre = this.app.pickedEntity;
+    if (pre && pre.ent) {
+      this.app.pickedEntity = null;
+      if (!opts.filter || opts.filter(pre.ent)) {
+        this._see([pre.ent]);
+        return Promise.resolve({ ent: pre.ent, p: pre.p || null, shift: false });
+      }
+    }
+    return this._ask('entity', msg, opts).then(function (r) {
+      if (r && r.ent) self._see([r.ent]);
+      return r;
+    });
   };
 
   Ctx.prototype.setPreview = function (arr) { this.app.preview = arr || []; this.app.refresh(); };
@@ -205,6 +359,28 @@
      Métodos del motor (se mezclan en App.prototype)
      ============================================================ */
   var Engine = CAD.Engine = {};
+
+  /* Devuelve true si el texto se ha consumido como sustitución */
+  Engine.tryOsnapWord = function (txt) {
+    var p = this.pending;
+    if (!p || (p.kind !== 'point' && p.kind !== 'dist' && p.kind !== 'angle')) return false;
+    var t = String(txt).trim().toUpperCase().replace(/^[_'"]+/, '');
+    if (!t) return false;
+    /* una sustitución nunca gana a una opción del comando */
+    if (p.opts.keywords && matchKeyword(t, p.opts.keywords)) return false;
+    var sp = OSNAP_SPECIAL[t];
+    if (sp === 'm2p') { this.out('_m2p', 'echo'); this.startMidBetween(); return true; }
+    if (sp === 'from') { this.out('_from', 'echo'); this.startFrom(); return true; }
+    if (sp === 'track') { this.out('_tt', 'echo'); this.startTrackPoint(); return true; }
+    var k = OSNAP_WORDS[t];
+    if (!k) return false;
+    this.osnapOverride = k;
+    this.out('_' + k, 'echo');
+    var lbl = k === 'none' ? 'Ninguno' : (CAD.SNAP_LABEL && CAD.SNAP_LABEL[k]) || k;
+    this.setPrompt(p.text.replace(/: $/, '') + '  (' + lbl + '): ');
+    this.refresh();
+    return true;
+  };
 
   Engine.out = function (s, cls) {
     if (this.ui && this.ui.log) this.ui.log(s, cls);
@@ -276,8 +452,11 @@
   };
 
   Engine.finishCommand = function (seq) {
+    this.pickedEntity = null;
     /* si entretanto se inició otro comando, no se toca su estado */
     if (seq !== undefined && seq !== this.cmdSeq) return;
+    if (this.doc && this.doc.commitTx) this.doc.commitTx();
+    if (this.clearPendBox) this.clearPendBox();
     this.pending = null;
     this.activeCmd = null;
     this.activeCtx = null;
@@ -297,6 +476,8 @@
   };
 
   Engine.cancel = function (silent) {
+    this.pickedEntity = null;
+    if (this.clearPendBox) this.clearPendBox();
     this.mtpCollect = null;
     this.osnapOverride = null;
     this.multipleCmd = null;
@@ -316,6 +497,10 @@
     var p = this.pending;
     if (!p) { this.exec(txt); return; }
     var t = String(txt);
+
+    /* sustitución de referencia a objetos escrita a mano */
+    if (this.tryOsnapWord(t)) return;
+
     this.out(p.text + t, 'echo');
 
     /* palabras clave */
@@ -330,6 +515,15 @@
 
     switch (p.kind) {
       case 'point': {
+        /* Algunas peticiones de punto admiten además un número suelto:
+           el factor de escala de ZOOM se teclea así (2, 2X, 2XP). */
+        if (p.opts.allowNumber) {
+          var mz = String(t).trim().match(/^([-+0-9.eE]+)\s*(XP|X)?$/i);
+          if (mz) {
+            var vz = num(mz[1]);
+            if (!isNaN(vz)) { this.resolve({ num: vz, rel: !!mz[2], paper: /xp/i.test(mz[2] || '') }); return; }
+          }
+        }
         var r = CAD.parsePoint(t, this, p.opts.base);
         if (r && r.p) { this.acceptPoint(r.p); return; }
         if (r && r.dist !== undefined && p.opts.base) {
@@ -401,9 +595,35 @@
   Engine.acceptPoint = function (pt) {
     var p = this.pending;
     if (!p) return;
+
+    /* referencia "desde": el primer punto fija el origen y el siguiente
+       se interpreta como desplazamiento respecto de él */
+    if (this.fromCollect === true) {
+      this.fromCollect = { x: pt.x, y: pt.y, z: pt.z };
+      this.fromBase = this.fromCollect;
+      p.opts.base = this.fromCollect;
+      this.lastPoint = { x: pt.x, y: pt.y, z: pt.z };
+      this.setPrompt('<Desfase>: ');
+      this.refresh();
+      return;
+    }
+    if (this.fromCollect && this.fromCollect.x !== undefined) {
+      this.fromCollect = null;
+      this.fromBase = null;
+    }
+
+    /* punto de rastreo temporal: se adquiere y se sigue pidiendo el punto */
+    if (this.ttCollect) {
+      this.ttCollect = null;
+      if (CAD.Track && CAD.Track.acquire) CAD.Track.acquire({ x: pt.x, y: pt.y });
+      this.setPrompt(p.text);
+      this.refresh();
+      return;
+    }
+
     /* referencia "punto medio entre 2 puntos" */
     if (this.mtpCollect) {
-      this.mtpCollect.push({ x: pt.x, y: pt.y });
+      this.mtpCollect.push({ x: pt.x, y: pt.y, z: pt.z });
       if (this.mtpCollect.length < 2) {
         this.setPrompt('Segundo punto del medio: ');
         this.refresh();
@@ -412,6 +632,7 @@
       var a = this.mtpCollect[0], b = this.mtpCollect[1];
       this.mtpCollect = null;
       pt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (a.z !== undefined || b.z !== undefined) pt.z = ((a.z || 0) + (b.z || 0)) / 2;
       this.setPrompt(p.text);
     }
     /* referencia a objeto usada: permite cotas asociativas */
@@ -419,9 +640,15 @@
       ? { ent: this.snapHit.ent, type: this.snapHit.type, p: { x: this.snapHit.p.x, y: this.snapHit.p.y } }
       : null;
     this.osnapOverride = null;
-    this.lastPoint = { x: pt.x, y: pt.y };
+    /* La cota Z viaja con el punto: sin esto, escribir 0,0,25 llegaba a
+       los comandos como 0,0 y todo el modelado 3D por teclado quedaba
+       aplastado sobre el plano actual. */
+    var out = { x: pt.x, y: pt.y };
+    if (typeof pt.z === 'number' && isFinite(pt.z)) out.z = pt.z;
+    this.lastPoint = { x: out.x, y: out.y };
+    if (out.z !== undefined) this.lastPoint.z = out.z;
     if (p.opts.base) this.lastDir = G.ang(p.opts.base, pt);
-    this.resolve({ x: pt.x, y: pt.y });
+    this.resolve(out);
   };
 
   /* ---------- Enter / Espacio ---------- */
@@ -465,14 +692,16 @@
     return null;
   };
 
-  Engine.feedPick = function (sp, wp, ent) {
+  Engine.feedPick = function (sp, wp, ent, shift) {
     var p = this.pending;
     if (!p) return false;
     if (p.kind === 'point') { this.acceptPoint(wp); return true; }
     if (p.kind === 'entity') {
       if (!ent) { this.out('No se encontró ningún objeto.', 'warn'); this.setPrompt(p.text); return true; }
       if (p.opts.filter && !p.opts.filter(ent)) { this.out('Objeto no válido.', 'warn'); this.setPrompt(p.text); return true; }
-      this.resolve({ ent: ent, p: wp });
+      /* La tecla Mayús viaja con la designación: comandos como RECORTA
+         la usan para invertir la operación sin salir del bucle. */
+      this.resolve({ ent: ent, p: wp, shift: !!shift });
       return true;
     }
     if (p.kind === 'select') {
@@ -566,7 +795,12 @@
   Engine.selectBox = function (p1, p2, crossing) {
     var doc = this.doc;
     var box = { x1: Math.min(p1.x, p2.x), y1: Math.min(p1.y, p2.y), x2: Math.max(p1.x, p2.x), y2: Math.max(p1.y, p2.y) };
-    var hit = doc.selectable().filter(function (e) { return E.hitBox(e, box, crossing, doc); });
+    var cand = CAD.queryVisible(this, box);
+    var hit = cand.filter(function (e) {
+      var l = doc.layers[e.layer];
+      if (l && l.locked) return false;
+      return E.hitBox(e, box, crossing, doc);
+    });
     var p = this.pending;
     if (p && p.kind === 'select' && p.removeMode) {
       var r = this.removeFromSelection(hit);
@@ -578,21 +812,39 @@
     return hit;
   };
 
-  Engine.pickAt = function (sp) {
+  /* Candidatos bajo el cursor, ya filtrados por el índice espacial */
+  Engine.nearCursor = function (sp, tol) {
     var doc = this.doc, r = this.r;
     var wp = r.s2w(sp);
-    var tol = (doc.vars.PICKBOX || 4) / r.view.zoom;
-    var list = doc.selectable();
-    for (var i = list.length - 1; i >= 0; i--) {
-      if (E.hit(list[i], wp, tol, doc)) return list[i];
+    var box = { x1: wp.x - tol, y1: wp.y - tol, x2: wp.x + tol, y2: wp.y + tol };
+    var list = CAD.queryVisible(this, box);
+    var lock = doc.layers;
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var l = lock[e.layer];
+      if (l && l.locked) continue;
+      var b = E.bboxOf(e, doc);
+      if (b.x1 <= b.x2 && (b.x2 < box.x1 || b.x1 > box.x2 || b.y2 < box.y1 || b.y1 > box.y2)) continue;
+      out.push(e);
+    }
+    return { list: out, wp: wp };
+  };
+
+  Engine.pickAt = function (sp) {
+    var doc = this.doc;
+    var tol = (doc.vars.PICKBOX || 4) / this.r.view.zoom;
+    var q = this.nearCursor(sp, tol);
+    for (var i = q.list.length - 1; i >= 0; i--) {
+      if (E.hit(q.list[i], q.wp, tol, doc)) return q.list[i];
     }
     return null;
   };
 
   Engine.pickAllAt = function (sp) {
-    var doc = this.doc, r = this.r;
-    var wp = r.s2w(sp);
-    var tol = (doc.vars.PICKBOX || 4) / r.view.zoom;
-    return doc.selectable().filter(function (e) { return E.hit(e, wp, tol, doc); });
+    var doc = this.doc;
+    var tol = (doc.vars.PICKBOX || 4) / this.r.view.zoom;
+    var q = this.nearCursor(sp, tol);
+    return q.list.filter(function (e) { return E.hit(e, q.wp, tol, doc); });
   };
 })();
