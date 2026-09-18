@@ -405,7 +405,10 @@
         var ra = ent.r * z;
         if (ra < 0.4) return;
         var ax = this.sx(ent.c.x), ay = this.sy(ent.c.y);
-        path.moveTo(ax + ra * Math.cos(-ent.a0), ay + ra * Math.sin(-ent.a0));
+        /* El subtrazado empieza donde arranca el barrido del lienzo, que
+           es el ángulo -a1: colocando el lápiz en -a0 se dibujaba además
+           la cuerda que cierra el arco. */
+        path.moveTo(ax + ra * Math.cos(-ent.a1), ay + ra * Math.sin(-ent.a1));
         path.arc(ax, ay, ra, -ent.a1, -ent.a0);
         return;
       }
@@ -416,7 +419,11 @@
         var rot = -Math.atan2(ent.maj.y, ent.maj.x);
         var p0 = G.ellPt(ent.c, ent.maj.x, ent.maj.y, ent.ratio, ent.t0);
         path.moveTo(this.sx(p0.x), this.sy(p0.y));
-        path.ellipse(ex, ey, ma, ma * ent.ratio, rot, -ent.t1, -ent.t0, true);
+        /* El parámetro del lienzo es el del mundo cambiado de signo (la Y
+           va al revés), así que el barrido va de -t0 a -t1 en sentido
+           antihorario.  Al revés se pintaba el arco complementario y una
+           cuerda de propina. */
+        path.ellipse(ex, ey, ma, ma * ent.ratio, rot, -ent.t0, -ent.t1, true);
         return;
       }
       default: {
@@ -693,7 +700,7 @@
         var ce = this.w2s(ent.c), ma = G.len(ent.maj) * this.view.zoom;
         var rot = -Math.atan2(ent.maj.y, ent.maj.x);
         ctx.beginPath();
-        ctx.ellipse(ce.x, ce.y, ma, ma * ent.ratio, rot, -ent.t1, -ent.t0, true);
+        ctx.ellipse(ce.x, ce.y, ma, ma * ent.ratio, rot, -ent.t0, -ent.t1, true);
         ctx.stroke();
         break;
       }
@@ -849,7 +856,7 @@
     });
     geo.arcs.forEach(function (a) {
       var c = self.w2s(a.c), r = a.r * self.view.zoom;
-      if (r > 0.4) { ctx.moveTo(c.x + r * Math.cos(-a.a0), c.y + r * Math.sin(-a.a0)); ctx.arc(c.x, c.y, r, -a.a1, -a.a0); }
+      if (r > 0.4) { ctx.moveTo(c.x + r * Math.cos(-a.a1), c.y + r * Math.sin(-a.a1)); ctx.arc(c.x, c.y, r, -a.a1, -a.a0); }
     });
     ctx.stroke();
     geo.solids.forEach(function (s) {
