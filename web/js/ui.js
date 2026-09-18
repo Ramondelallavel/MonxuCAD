@@ -326,6 +326,7 @@
         { label: 'Paletas', groups: [[{ cmd: 'PROPIEDADES', big: true }], [{ cmd: 'CAPA', big: true }], [{ cmd: 'RECORRERCAPAS', icon: 'layer', title: 'Recorrer capas' }]] },
         { label: 'Coordenadas', groups: [[{ cmd: 'SCP', big: true }], [{ cmd: 'SCPGLOBAL', icon: 'ucs', title: 'SCP global' }, { cmd: 'VISTA', title: 'Vistas' }]] },
         { label: 'Visibilidad', groups: [[{ cmd: 'AISLAROBJETOS', big: true, title: 'Aislar' }], [{ cmd: 'OCULTAROBJETOS', big: true, icon: 'view', title: 'Ocultar' }], [{ cmd: 'FINAISLAR', icon: 'view', title: 'Mostrar todo' }]] },
+        { label: 'Espacio de trabajo', groups: [[{ cmd: 'MODELADO3D', big: true, icon: 'view3d', title: 'Modelado 3D' }], [{ cmd: 'DIBUJO2D', big: true, icon: 'plan', title: 'Dibujo 2D' }]] },
         { label: 'Interfaz', groups: [[{ cmd: 'LIMPIAPANTALLA', title: 'Pantalla limpia' }, { cmd: 'REGEN' }, { cmd: 'OPCIONES' }]] }
       ]
     },
@@ -357,6 +358,7 @@
     },
     {
       id: 'modelado', label: 'Modelado 3D', panels: [
+        { label: 'Espacio', groups: [[{ cmd: 'DIBUJO2D', big: true, icon: 'plan', title: 'Volver a 2D' }]] },
         {
           label: 'Primitivas', groups: [
             [{ cmd: 'PRISMARECT', big: true, title: 'Prisma' }],
@@ -514,7 +516,7 @@
       navbar: $('navbar'), layoutTabs: $('layoutTabs'), dynin: $('dynin'),
       dynA: $('dynA'), dynB: $('dynB'), dynSep: $('dynSep'), dynTip: $('dynTip'),
       snapTip: $('snapTip'), toast: $('toast'), search: $('searchBox'),
-      scaleLabel: $('scaleLabel'), file: $('fileInput')
+      scaleLabel: $('scaleLabel'), file: $('fileInput'), ws: $('wsBtn')
     };
     this.buildQAT();
     this.buildRibbon();
@@ -527,6 +529,7 @@
     $('btnHelp').addEventListener('click', function () { self.helpDialog(); });
     $('viewcube').addEventListener('click', function () { app.startCommand('ZOOM', ['E']); });
     $('scaleLabel').addEventListener('click', function (e) { self.scaleMenu(e.currentTarget); });
+    if (this.el.ws) this.el.ws.addEventListener('click', function (e) { self.wsMenu(e.currentTarget); });
     $('scaleLabel').style.cursor = 'pointer';
     $('cmdwin').addEventListener('contextmenu', function (e) {
       e.preventDefault();
@@ -719,6 +722,7 @@
     Array.prototype.forEach.call(this.el.toggles.children, function (b) {
       b.classList.toggle('on', !!st[b.dataset.tog]);
     });
+    this.syncWorkspace();
     this.syncPropBar();
   };
 
@@ -1481,9 +1485,57 @@
   };
 
   /* ---------- Indicador 3D en la barra de estado ---------- */
+  /* ------------------------------------------------------------
+     Conmutador de espacio de trabajo
+     AutoCAD lo lleva en la barra de estado y de ahí se pasa de "Dibujo
+     y anotación" a "Modelado 3D".  Antes sólo se podía cambiar de modo
+     escribiendo un comando, que es justo lo que nadie encuentra.
+     ------------------------------------------------------------ */
+  var ESPACIOS = [
+    { id: '2d', label: 'Dibujo y anotación', tab: 'inicio', icon: 'line' },
+    { id: '3d', label: 'Modelado 3D', tab: 'modelado', icon: 'view3d' }
+  ];
+  UI.prototype.setWorkspace = function (id) {
+    var app = this.app;
+    if (id === '3d') {
+      if (app.paperMode) app.setLayout(-1);
+      var venia = !app.is3D;
+      if (!app.set3D(true)) return false;
+      /* al entrar por primera vez se ofrece una isométrica, como el
+         espacio de trabajo de modelado de AutoCAD */
+      if (venia && app.view3d && app.view3d.cam && !app.ws3dVisto) {
+        app.ws3dVisto = true;
+        app.view3d.cam.setView('SWISO');
+        if (app.zoom3dExtents) app.zoom3dExtents();
+      }
+      app.out('Espacio de trabajo: Modelado 3D.');
+    } else {
+      app.set3D(false);
+      app.out('Espacio de trabajo: Dibujo y anotación.');
+    }
+    app.refresh();
+    this.syncWorkspace();
+    return true;
+  };
+  UI.prototype.syncWorkspace = function () {
+    var b = this.el && this.el.ws;
+    if (!b) return;
+    var en3d = !!this.app.is3D;
+    b.textContent = en3d ? ESPACIOS[1].label : ESPACIOS[0].label;
+    b.classList.toggle('en3d', en3d);
+  };
+  UI.prototype.wsMenu = function (anchor) {
+    var self = this, r = anchor.getBoundingClientRect(), act = this.app.is3D ? '3d' : '2d';
+    this.menuAt(r.left, r.top - 4 - ESPACIOS.length * 26, ESPACIOS.map(function (w) {
+      return { label: (w.id === act ? '● ' : '   ') + w.label, icon: w.icon,
+               action: function () { self.setWorkspace(w.id); } };
+    }));
+  };
+
   UI.prototype.setStatus3D = function (on) {
     var el = document.getElementById('st3d');
     if (el) el.classList.toggle('on', !!on);
+    this.syncWorkspace();
     /* Al entrar en el espacio 3D la cinta pasa a las herramientas de
        modelado, y al salir vuelve a la pestaña que estaba.  Es lo que
        hace SolidWorks al cambiar de entorno. */

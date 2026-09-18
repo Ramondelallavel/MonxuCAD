@@ -562,6 +562,21 @@ button { font-family: inherit; font-size: inherit; color: inherit; }
 .stat-sep { width: 1px; height: 14px; background: var(--edge-soft); display: inline-block; }
 #statusRight { margin-left: auto; display: flex; align-items: center; gap: 10px; color: var(--ink-dim); white-space: nowrap; }
 
+/* Conmutador de espacio de trabajo (2D / 3D), como el de AutoCAD */
+#wsBtn {
+  background: var(--chrome-4); color: var(--ink);
+  border: 1px solid var(--edge-soft); border-radius: 3px;
+  font: inherit; font-size: 11px; line-height: 1;
+  padding: 3px 18px 3px 8px; cursor: pointer; position: relative;
+}
+#wsBtn::after {
+  content: ''; position: absolute; right: 6px; top: 50%;
+  border: 3px solid transparent; border-top-color: currentColor;
+  margin-top: -1px;
+}
+#wsBtn:hover { background: var(--chrome-5, var(--chrome-4)); border-color: var(--accent, #2f7fd1); }
+#wsBtn.en3d { color: #7fc3ff; border-color: rgba(47,127,209,.6); background: rgba(47,127,209,.18); }
+
 /* ══════════════════ Diálogos ══════════════════ */
 #modalRoot { position: fixed; inset: 0; pointer-events: none; z-index: 100; }
 .modal-back {

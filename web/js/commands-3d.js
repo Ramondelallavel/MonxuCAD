@@ -1136,6 +1136,33 @@
     ctx.out('Estilo visual: ' + V3.STYLES[found].label);
   });
 
+  /* ============================================================
+     ESPACIOS DE TRABAJO
+     El paso de 2D a 3D estaba sólo en comandos sueltos (SWISO, ÓRBITA,
+     ESTILOVISUAL...) y no había forma evidente de volver.  Aquí queda
+     como un comando con nombre propio, igual que WORKSPACE en AutoCAD,
+     y con el conmutador de la barra de estado.
+     ============================================================ */
+  Cmd.add(['ESPTRABAJO', 'WORKSPACE', 'WSCURRENT'],
+  { group: 'view3d', icon: 'view3d', title: 'Espacio de trabajo', transparent: true },
+  async function (ctx, args) {
+    var ui = ctx.app.ui;
+    var k = args && args[0] ? String(args[0]).toUpperCase().charAt(0) : null;
+    if (!k) {
+      var r = await ctx.getKeyword('Espacio de trabajo', ['Dibujo y anotación', 'Modelado'],
+                                   { def: ctx.app.is3D ? 'Modelado' : 'Dibujo y anotación' });
+      if (!r) return;
+      k = (r.kw || '').charAt(0);
+    }
+    ui.setWorkspace(k === 'M' ? '3d' : '2d');
+  });
+
+  Cmd.add(['MODELADO3D', '3D', 'M3D'], { group: 'view3d', icon: 'view3d', title: 'Modelado 3D', transparent: true },
+  async function (ctx) { ctx.app.ui.setWorkspace('3d'); });
+
+  Cmd.add(['DIBUJO2D', '2D'], { group: 'view3d', icon: 'plan', title: 'Dibujo y anotación', transparent: true },
+  async function (ctx) { ctx.app.ui.setWorkspace('2d'); });
+
   Cmd.add(['PLANTA2D', 'PLAN', 'VISTA2D'], { group: 'view3d', icon: 'plan', title: 'Volver a 2D', transparent: true },
   async function (ctx) {
     ctx.app.set3D(false);
