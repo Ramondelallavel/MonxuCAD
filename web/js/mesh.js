@@ -577,19 +577,32 @@
       var a = this.verts[tris[i][0]], b = this.verts[tris[i][1]], c = this.verts[tris[i][2]];
       fn[i] = G3.norm(G3.cross(G3.sub(b, a), G3.sub(c, a)));
     }
-    /* triángulos que tocan cada vértice */
-    var inc = new Array(this.verts.length);
+    /* Triángulos que tocan cada vértice, agrupados POR POSICIÓN y no por
+       índice: después de un booleano dos vértices que ocupan el mismo
+       sitio pueden tener índices distintos, y agrupando por índice el
+       suavizado no los unía, de modo que las superficies curvas salían
+       facetadas en cuanto se les hacía un taladro. */
+    var bb = this.bbox();
+    var esc = Math.max(1e-9, G3.boxDiag(bb));
+    var tol = esc * 1e-6;
+    var mapa = new Map();
+    var claveDe = new Array(this.verts.length);
+    for (i = 0; i < this.verts.length; i++) {
+      var v = this.verts[i];
+      var k2 = Math.round(v.x / tol) + '|' + Math.round(v.y / tol) + '|' + Math.round(v.z / tol);
+      claveDe[i] = k2;
+    }
     for (i = 0; i < nt; i++)
       for (j = 0; j < 3; j++) {
-        var k = tris[i][j];
-        if (!inc[k]) inc[k] = [];
-        inc[k].push(i);
+        var k = claveDe[tris[i][j]];
+        var l2 = mapa.get(k);
+        if (!l2) { l2 = []; mapa.set(k, l2); }
+        l2.push(i);
       }
     var out = new Array(nt * 3);
     for (i = 0; i < nt; i++) {
       for (j = 0; j < 3; j++) {
-        var vk = tris[i][j];
-        var list = inc[vk];
+        var list = mapa.get(claveDe[tris[i][j]]) || [i];
         var acc = G3.v(0, 0, 0), used = 0;
         for (var q = 0; q < list.length; q++) {
           var t = list[q];
@@ -623,6 +636,16 @@
   function dim(v) { return typeof v === 'number' && isFinite(v) && Math.abs(v) > 1e-12; }
   function rad(v) { return typeof v === 'number' && isFinite(v) && v > 1e-12; }
 
+  /* Una primitiva con medida negativa (una altura hacia abajo, por
+     ejemplo) salía con las caras del revés: las normales apuntaban hacia
+     dentro y el programa la tomaba por un sólido vuelto, de modo que sus
+     facetas se dibujaban como aristas vivas.  Se comprueba el signo del
+     volumen y se voltea si hace falta. */
+  function haciaFuera(m) {
+    if (m && m.faces.length && m.volume() < 0) m.flip();
+    return m;
+  }
+
   M.box = function (l, w, h, centered) {
     if (!dim(l) || !dim(w) || !dim(h)) return null;
     var x0 = centered ? -l / 2 : 0, y0 = centered ? -w / 2 : 0, z0 = centered ? -h / 2 : 0;
@@ -630,7 +653,7 @@
     var v = [v3(x0, y0, z0), v3(x1, y0, z0), v3(x1, y1, z0), v3(x0, y1, z0),
              v3(x0, y0, z1), v3(x1, y0, z1), v3(x1, y1, z1), v3(x0, y1, z1)];
     var f = [[3, 2, 1, 0], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   M.cylinder = function (r, h, seg, r2) {
@@ -657,7 +680,7 @@
       f.push(top.slice());
       for (i = 0; i < seg; i++) f.push([i, (i + 1) % seg, seg + (i + 1) % seg, seg + i]);
     }
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   M.cone = function (r, h, seg, rTop) { return M.cylinder(r, h, seg, rTop || 0); };
@@ -683,7 +706,7 @@
       for (i = 0; i < seg; i++)
         f.push([idx(j, i), idx(j, i + 1), idx(j + 1, i + 1), idx(j + 1, i)]);
     for (i = 0; i < seg; i++) f.push([idx(ring - 1, i), idx(ring - 1, i + 1), top]);
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   M.torus = function (R, r, seg, segT) {
@@ -703,7 +726,7 @@
     for (i = 0; i < seg; i++)
       for (j = 0; j < segT; j++)
         f.push([id(i, j), id(i + 1, j), id(i + 1, j + 1), id(i, j + 1)]);
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   M.wedge = function (l, w, h, centered) {
@@ -713,7 +736,7 @@
     var v = [v3(x0, y0, z0), v3(x1, y0, z0), v3(x1, y1, z0), v3(x0, y1, z0),
              v3(x0, y0, z1), v3(x0, y1, z1)];
     var f = [[3, 2, 1, 0], [0, 1, 4], [2, 3, 5], [1, 2, 5, 4], [0, 4, 5, 3]];
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   M.pyramid = function (r, h, sides, rTop) {
@@ -741,7 +764,7 @@
       v.push(v3(0, 0, h));
       for (i = 0; i < sides; i++) f.push([i, (i + 1) % sides, sides]);
     }
-    return new Mesh(v, f);
+    return haciaFuera(new Mesh(v, f));
   };
 
   /* Toroide/cilindro elíptico para EXTRUSIONES de elipse: se resuelve con

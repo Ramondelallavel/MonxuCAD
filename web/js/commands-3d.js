@@ -610,13 +610,52 @@
     }
     var p = r.p ? v3(r.p.x, r.p.y, r.p.z || 0) : null;
     if (!p) return null;
-    var best = null, bd = Infinity;
-    for (var i = 0; i < mesh.faces.length; i++) {
-      var c = mesh.faceCenter(mesh.faces[i]);
-      var d = G3.dist2(c, p);
-      if (d < bd) { bd = d; best = i; }
+    /* Sin rayo (designación por teclado o desde la vista 2D) se busca la
+       cara que de verdad contiene el punto: la que pasa por él y cuyo
+       contorno lo encierra.  Quedarse con el centro más próximo elegía a
+       veces una cara lateral cuando se apuntaba a la de arriba. */
+    var best = null, bd = Infinity, i;
+    for (i = 0; i < mesh.faces.length; i++) {
+      var f = mesh.faces[i];
+      var n = mesh.faceNormal(f);
+      if (G3.len2(n) < 0.5) continue;
+      var w = G3.dot(n, mesh.verts[f[0]]);
+      var dp = Math.abs(G3.dot(n, p) - w);
+      if (dp > 1e-6 * Math.max(1, Math.abs(w))) continue;      /* no está en su plano */
+      if (!enPoligono(mesh, f, n, p)) continue;
+      var d2 = G3.dist2(mesh.faceCenter(f), p);
+      if (d2 < bd) { bd = d2; best = i; }
+    }
+    if (best !== null) return best;
+    /* nada lo contiene: la cara cuyo plano pasa más cerca del punto */
+    bd = Infinity;
+    for (i = 0; i < mesh.faces.length; i++) {
+      var f2 = mesh.faces[i];
+      var n2 = mesh.faceNormal(f2);
+      if (G3.len2(n2) < 0.5) continue;
+      var dd = Math.abs(G3.dot(n2, p) - G3.dot(n2, mesh.verts[f2[0]]));
+      var cc = Math.sqrt(G3.dist2(mesh.faceCenter(f2), p));
+      var score = dd * 1000 + cc;
+      if (score < bd) { bd = score; best = i; }
     }
     return best;
+  }
+
+  /* ¿cae el punto dentro del contorno de la cara? (proyectando al plano
+     principal de su normal) */
+  function enPoligono(mesh, f, n, p) {
+    var ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    var u, v;
+    if (az >= ax && az >= ay) { u = 'x'; v = 'y'; }
+    else if (ay >= ax) { u = 'x'; v = 'z'; }
+    else { u = 'y'; v = 'z'; }
+    var dentro = false;
+    for (var i = 0, j = f.length - 1; i < f.length; j = i++) {
+      var a = mesh.verts[f[i]], b = mesh.verts[f[j]];
+      if ((a[v] > p[v]) !== (b[v] > p[v]) &&
+          p[u] < (b[u] - a[u]) * (p[v] - a[v]) / (b[v] - a[v]) + a[u]) dentro = !dentro;
+    }
+    return dentro;
   }
 
   /* ============================================================
@@ -1320,23 +1359,28 @@
        del plano de la cara, entrando hacia dentro del material */
     var piezas = [];
     var rr = d / 2;
-    var cuerpo = M.cylinder(rr, -L, M.segFor(rr));
+    /* Todas las partes del taladro se facetan igual y en fase: con
+       números de facetas distintos, la unión del avellanado con el
+       vástago dejaba un abanico de caras pequeñas que se veía como una
+       telaraña dentro del agujero. */
+    var seg = M.segFor(Math.max(rr, d));
+    var cuerpo = M.cylinder(rr, -L, seg);
     if (!cuerpo) { ctx.err('Diámetro no válido.'); return; }
     piezas.push(cuerpo);
     if (!pasante) {
       /* punta de broca a 118°, como una broca de verdad */
       var hPunta = rr / Math.tan(59 * Math.PI / 180);
-      var punta = M.cone(rr, -hPunta, M.segFor(rr));
+      var punta = M.cone(rr, -hPunta, seg);
       if (punta) piezas.push(punta.clone().transform(G3.mTrans(0, 0, -L)));
     }
     var tk = tipo && tipo.kw;
     if (tk === 'A') {
       var rAv = d;            /* avellanado a 90° */
-      var cs = M.cylinder(rAv, -(rAv - rr), M.segFor(rAv), rr);
+      var cs = M.cylinder(rAv, -(rAv - rr), seg, rr);
       if (cs) piezas.push(cs);
     } else if (tk === 'C') {
       var rCaja = d * 0.85, hCaja = d * 0.6;
-      var cb = M.cylinder(rCaja, -hCaja, M.segFor(rCaja));
+      var cb = M.cylinder(rCaja, -hCaja, seg);
       if (cb) piezas.push(cb);
     }
     var herr = piezas[0].clone();
