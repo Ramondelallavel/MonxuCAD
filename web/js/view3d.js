@@ -214,6 +214,10 @@
   /* ============================================================
      Vista 3D
      ============================================================ */
+  /* Caché de geometría de GPU por entidad, invalidada por su firma */
+  var GEO = new WeakMap();
+  V3.dropGeo = function (ent) { if (ent) GEO.delete(ent); else GEO = new WeakMap(); };
+
   function View(canvas) {
     this.cv = canvas;
     this.cam = new Cam();
@@ -278,6 +282,7 @@
     if (!this.ok) return;
     var doc = app.doc, gl = this.gl;
     var TP = [], TN = [], TC = [], LP = [], LC = [];
+    var chunks = [], edgeChunks = [];
     var ents = doc.visible ? doc.visible() : doc.entities;
     var style = STYLES[this.style] || STYLES.ARISTASSOMBRA;
     var i, j, k;
@@ -301,7 +306,7 @@
         if (!mesh) continue;
         var sel = app.selSet && app.selSet.indexOf(e) >= 0;
         var cc = sel ? [0.20, 0.72, 1.0] : c;
-        pushMesh(mesh, cc, style);
+        pushMesh(mesh, cc, style, e);
         var bb = mesh.bbox();
         box = G3.boxMerge(box, bb);
         continue;
@@ -324,41 +329,90 @@
       }
     }
 
-    function pushMesh(mesh, c, st) {
-      var sh = mesh.shadingNormals(32);
-      var tris = sh.tris, NR = sh.normals;
-      for (var t = 0; t < tris.length; t++) {
-        var A = mesh.verts[tris[t][0]], B = mesh.verts[tris[t][1]], C = mesh.verts[tris[t][2]];
-        var na = NR[t * 3], nb = NR[t * 3 + 1], nc = NR[t * 3 + 2];
-        TP.push(A.x, A.y, A.z, B.x, B.y, B.z, C.x, C.y, C.z);
-        TN.push(na.x, na.y, na.z, nb.x, nb.y, nb.z, nc.x, nc.y, nc.z);
-        TC.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
-      }
-      if (st.edges) {
+    /* La teselación y las normales de cada sólido se guardan en caché por
+       entidad: sin ella, mover un objeto obliga a recalcular la malla de
+       todos los demás y con cientos de sólidos eso se nota. */
+    function pushMesh(mesh, c, st, ent) {
+      var cache = ent ? GEO.get(ent) : null;
+      if (!cache || cache.sig !== ent.sig) {
+        var sh = mesh.shadingNormals(32);
+        var tris = sh.tris, NR = sh.normals;
+        var n = tris.length;
+        var pos = new Float32Array(n * 9), nor = new Float32Array(n * 9);
+        for (var t = 0; t < n; t++) {
+          var A = mesh.verts[tris[t][0]], B = mesh.verts[tris[t][1]], C = mesh.verts[tris[t][2]];
+          var na = NR[t * 3], nb = NR[t * 3 + 1], nc = NR[t * 3 + 2];
+          var o = t * 9;
+          pos[o] = A.x; pos[o + 1] = A.y; pos[o + 2] = A.z;
+          pos[o + 3] = B.x; pos[o + 4] = B.y; pos[o + 5] = B.z;
+          pos[o + 6] = C.x; pos[o + 7] = C.y; pos[o + 8] = C.z;
+          nor[o] = na.x; nor[o + 1] = na.y; nor[o + 2] = na.z;
+          nor[o + 3] = nb.x; nor[o + 4] = nb.y; nor[o + 5] = nb.z;
+          nor[o + 6] = nc.x; nor[o + 7] = nc.y; nor[o + 8] = nc.z;
+        }
         var ed = mesh.sharpEdges(18);
+        var ep = new Float32Array(ed.length * 6);
+        for (var q = 0; q < ed.length; q++) {
+          var P = mesh.verts[ed[q][0]], Q = mesh.verts[ed[q][1]];
+          var o2 = q * 6;
+          ep[o2] = P.x; ep[o2 + 1] = P.y; ep[o2 + 2] = P.z;
+          ep[o2 + 3] = Q.x; ep[o2 + 4] = Q.y; ep[o2 + 5] = Q.z;
+        }
+        cache = { sig: ent ? ent.sig : null, pos: pos, nor: nor, edge: ep };
+        if (ent) GEO.set(ent, cache);
+      }
+      chunks.push({ pos: cache.pos, nor: cache.nor, col: c });
+      if (st.edges && cache.edge.length) {
         var ec;
         if (st.id === 'hidden' || st.id === 'wire' || st.id === 'w2d') ec = c;
         else if (st.id === 'concept') ec = [0.05, 0.07, 0.11];
         else if (st.id === 'gray') ec = [0.10, 0.10, 0.10];
         else ec = [c[0] * 0.16, c[1] * 0.16, c[2] * 0.18];
-        for (var q = 0; q < ed.length; q++) {
-          var P = mesh.verts[ed[q][0]], Q = mesh.verts[ed[q][1]];
-          LP.push(P.x, P.y, P.z, Q.x, Q.y, Q.z);
-          LC.push(ec[0], ec[1], ec[2], ec[0], ec[1], ec[2]);
-        }
+        edgeChunks.push({ pos: cache.edge, col: ec });
       }
     }
 
     this.box = G3.boxValid(box) ? box : null;
     if (this.box) this.cam.radius = Math.max(G3.boxDiag(this.box) / 2, 1e-3);
     var F = Float32Array;
-    up(gl, this.buffers.tri.pos, new F(TP));
-    up(gl, this.buffers.tri.nrm, new F(TN));
-    up(gl, this.buffers.tri.col, new F(TC));
-    up(gl, this.buffers.line.pos, new F(LP));
-    up(gl, this.buffers.line.col, new F(LC));
-    this.counts.tri = TP.length / 3;
-    this.counts.line = LP.length / 3;
+
+    /* un solo búfer con todos los trozos, sin volver a teselar nada */
+    var nT = 0, ii;
+    for (ii = 0; ii < chunks.length; ii++) nT += chunks[ii].pos.length;
+    var aPos = new F(nT + TP.length), aNor = new F(nT + TN.length), aCol = new F(nT + TC.length);
+    var off = 0;
+    for (ii = 0; ii < chunks.length; ii++) {
+      var ch = chunks[ii];
+      aPos.set(ch.pos, off);
+      aNor.set(ch.nor, off);
+      for (var k2 = 0; k2 < ch.pos.length; k2 += 3) {
+        aCol[off + k2] = ch.col[0]; aCol[off + k2 + 1] = ch.col[1]; aCol[off + k2 + 2] = ch.col[2];
+      }
+      off += ch.pos.length;
+    }
+    if (TP.length) { aPos.set(TP, off); aNor.set(TN, off); aCol.set(TC, off); }
+
+    var nE = 0;
+    for (ii = 0; ii < edgeChunks.length; ii++) nE += edgeChunks[ii].pos.length;
+    var ePos = new F(nE + LP.length), eCol = new F(nE + LC.length);
+    off = 0;
+    for (ii = 0; ii < edgeChunks.length; ii++) {
+      var eh = edgeChunks[ii];
+      ePos.set(eh.pos, off);
+      for (k2 = 0; k2 < eh.pos.length; k2 += 3) {
+        eCol[off + k2] = eh.col[0]; eCol[off + k2 + 1] = eh.col[1]; eCol[off + k2 + 2] = eh.col[2];
+      }
+      off += eh.pos.length;
+    }
+    if (LP.length) { ePos.set(LP, off); eCol.set(LC, off); }
+
+    up(gl, this.buffers.tri.pos, aPos);
+    up(gl, this.buffers.tri.nrm, aNor);
+    up(gl, this.buffers.tri.col, aCol);
+    up(gl, this.buffers.line.pos, ePos);
+    up(gl, this.buffers.line.col, eCol);
+    this.counts.tri = aPos.length / 3;
+    this.counts.line = ePos.length / 3;
     this.rev = doc.rev;
     this.builtStyle = this.style;
   };
