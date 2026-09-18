@@ -123,6 +123,7 @@
     order: '<path d="M3 6h12M3 12h8M3 18h12"/><path d="M19 4v16M16 17l3 3 3-3"/>',
     find: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/>',
     tree: '<path d="M5 4v14M5 8h6M5 13h6M5 18h6"/><rect x="11" y="5" width="8" height="5" rx="1"/><rect x="11" y="15" width="8" height="5" rx="1"/>',
+    plane: '<path d="M3 15 12 9l9 6-9 6z"/><path d="M12 9V3M9 5l3-2 3 2"/>',
     mesh: '<path d="M3 8h18M3 16h18M8 3v18M16 3v18"/><rect x="3" y="3" width="18" height="18" rx="1"/>',
     surf: '<path d="M3 15c4-6 8-6 9-3s5 3 9-3"/><path d="M3 20c4-6 8-6 9-3s5 3 9-3"/><path d="M3 15v5M21 9v5M12 12v5"/>',
     dimrad: '<circle cx="11" cy="13" r="7"/><path d="M11 13 20 4"/><path d="M17 4h3v3"/>',
@@ -367,7 +368,8 @@
           label: 'Crear', groups: [
             [{ cmd: 'EXTRUSION', big: true }],
             [{ cmd: 'REVOLUCION', big: true }],
-            [{ cmd: 'BARRIDO' }, { cmd: 'SOLEVADO' }, { cmd: 'PULSARTIRAR', title: 'Pulsar/tirar' }]
+            [{ cmd: 'BARRIDO' }, { cmd: 'SOLEVADO' }, { cmd: 'PULSARTIRAR', title: 'Pulsar/tirar' }],
+            [{ cmd: 'PLANOTRABAJO', icon: 'plane', title: 'Plano de trabajo' }]
           ]
         },
         {

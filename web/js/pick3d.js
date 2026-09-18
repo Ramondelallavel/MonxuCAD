@@ -160,7 +160,7 @@
     app.snap3dCands = [];
 
     /* sin geometría bajo la mira: el plano de trabajo */
-    var gp = view.groundPoint(sx, sy, doc.vars.ELEVATION || 0);
+    var gp = view.groundPoint(sx, sy, doc.vars.ELEVATION || 0, doc);
     if (!gp) return null;
     return { p: gp, type: 'pla', ent: null, label: null };
   };

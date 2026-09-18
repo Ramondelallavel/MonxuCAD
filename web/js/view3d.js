@@ -612,9 +612,12 @@
   }
 
   /* ---------- Proyección al plano de trabajo (para introducir puntos) ---------- */
-  View.prototype.groundPoint = function (sx, sy, z) {
+  View.prototype.groundPoint = function (sx, sy, z, doc) {
     var r = this.cam.ray(sx, sy, this.W, this.H);
     if (!r) return null;
+    /* si hay plano de trabajo, el punto cae sobre él */
+    if (doc && CAD.WPlane && CAD.WPlane.get(doc))
+      return CAD.WPlane.rayPoint(doc, r.org, r.dir, z || 0);
     var hit = G3.rayPlane(r.org, r.dir, { n: v3(0, 0, 1), w: z || 0 });
     return hit ? hit.p : null;
   };

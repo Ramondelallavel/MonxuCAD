@@ -24,6 +24,16 @@
   }
   function z0(ctx) { return ctx.doc.vars.ELEVATION || 0; }
 
+  /* Matriz que coloca una primitiva en el punto dado, apoyada sobre el
+     plano de trabajo si lo hay.  Sin plano se comporta como siempre:
+     una traslación sobre el plano XY a la elevación actual. */
+  function coloca(ctx, c) {
+    var W = CAD.WPlane, pl = W ? W.get(ctx.doc) : null;
+    if (!pl) return G3.mTrans(c.x, c.y, c.z !== undefined ? c.z : z0(ctx));
+    var p = { x: c.x, y: c.y, z: c.z !== undefined ? c.z : 0 };
+    return W.matrixAt(pl, p);
+  }
+
   /* Selección filtrada a sólidos/mallas */
   async function get3D(ctx, msg, opts) {
     var sel = await ctx.getSelection(msg || 'Designe sólidos', opts);
@@ -210,7 +220,7 @@
     }
     var r = base.r;
     e = S.solid({ op: 'cylinder', r: r, h: h, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(base.c.x, base.c.y, z0(ctx));
+    e.m = coloca(ctx, base.c);
     addSolid(ctx, e);
     ctx.out('Cilindro Ø' + G.fmt(r * 2, 3) + ' × ' + G.fmt(h, 3) +
             '   volumen ' + G.fmt(Math.PI * r * r * h, 3));
@@ -223,7 +233,7 @@
     var c = base.c, r = base.r;
     ctx.doc.mark('ESFERA');
     var e = S.solid({ op: 'sphere', r: r, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(c.x, c.y, z0(ctx));
+    e.m = coloca(ctx, c);
     addSolid(ctx, e);
     ctx.out('Esfera R' + G.fmt(r, 3) + '   volumen ' + G.fmt(4 / 3 * Math.PI * r * r * r, 3));
   });
@@ -260,7 +270,7 @@
     }
     var r = base.r;
     e = S.solid({ op: 'cone', r: r, h: h, r2: rTop, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(base.c.x, base.c.y, z0(ctx));
+    e.m = coloca(ctx, base.c);
     addSolid(ctx, e);
     ctx.out((rTop ? 'Tronco de cono' : 'Cono') + ' Ø' + G.fmt(r * 2, 3) + ' × ' + G.fmt(h, 3));
   });
@@ -306,7 +316,7 @@
     if (!num(r)) return;
     ctx.doc.mark('TOROIDE');
     var e = S.solid({ op: 'torus', R: R, r: r, seg: M.segFor(R) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(c.x, c.y, z0(ctx));
+    e.m = coloca(ctx, c);
     addSolid(ctx, e);
     ctx.out('Toroide R' + G.fmt(R, 3) + ' r' + G.fmt(r, 3) +
             '   volumen ' + G.fmt(2 * Math.PI * Math.PI * R * r * r, 3));
@@ -501,21 +511,104 @@
             G.fmt(Math.abs(mesh.volume()), 3));
   });
 
+  /* ------------------------------------------------------------
+     PULSARTIRAR — modelado directo
+
+     Sobre una cara de un sólido, la empuja o la tira a lo largo de su
+     normal: es el gesto con el que se trabaja en SolidWorks, Inventor o
+     Fusion.  Sobre un contorno 2D cerrado, lo extruye, que es lo que ya
+     hacía antes.
+     ------------------------------------------------------------ */
   Cmd.add(['PULSARTIRAR', 'PRESSPULL'], { group: '3d', icon: 'presspull', title: 'Pulsar o tirar' },
   async function (ctx) {
-    var r = await ctx.getEntity('Designe objeto o área delimitada');
+    var r = await ctx.getEntity('Designe una cara del sólido o un área delimitada');
     if (!r || !r.ent) return;
+
+    /* ---- cara de un sólido ---- */
+    if (S.is3D(r.ent)) {
+      var ent = r.ent;
+      var mesh = S.meshOf(ent);
+      if (!mesh) { ctx.err('El sólido no tiene malla.'); return; }
+      var pick = caraSenalada(ctx, ent, mesh, r);
+      if (pick === null) { ctx.err('No se ha podido determinar la cara. Señale sobre ella.'); return; }
+      var reg = mesh.planarRegion(pick);
+      var loops = mesh.regionLoops(reg.faces);
+      if (!loops.length) { ctx.err('La cara no tiene contorno cerrado.'); return; }
+      ctx.out('Cara de ' + reg.faces.length + ' polígono(s); normal ' +
+              G.fmt(reg.n.x, 3) + ', ' + G.fmt(reg.n.y, 3) + ', ' + G.fmt(reg.n.z, 3));
+
+      var d = await ctx.getDist('Precise la distancia (positiva tira, negativa empuja)', {
+        base: { x: r.p ? r.p.x : 0, y: r.p ? r.p.y : 0 }
+      });
+      if (!num(d) || Math.abs(d) < 1e-9) return;
+
+      /* prisma sobre el contorno exterior, con los interiores como huecos */
+      var conts = loops.map(function (lp) {
+        var pts = [];
+        for (var i = 0; i < lp.length; i++) {
+          if (i && lp[i] === lp[0]) break;
+          pts.push(mesh.verts[lp[i]]);
+        }
+        return pts;
+      }).filter(function (q) { return q.length >= 3; });
+      if (!conts.length) { ctx.err('La cara no tiene contorno utilizable.'); return; }
+      conts.sort(function (x, y) { return Math.abs(G3.polyArea(y)) - Math.abs(G3.polyArea(x)); });
+      var dir = G3.mul(G3.norm(reg.n), d);
+      var prisma = M.extrude(conts[0], dir, 0, conts.slice(1));
+      if (!prisma || !prisma.faces.length) { ctx.err('No se ha podido generar el volumen.'); return; }
+
+      ctx.doc.mark('PULSARTIRAR');
+      var nodo = { hist: { op: 'mesh',
+                           verts: prisma.verts.map(function (q) { return { x: q.x, y: q.y, z: q.z }; }),
+                           faces: prisma.faces.map(function (f) { return f.slice(); }) },
+                   m: null, nombre: (d > 0 ? 'Tirar cara ' : 'Empujar cara ') + G.fmt(Math.abs(d), 3) };
+      var e2 = S.solid({ op: 'bool', kind: d > 0 ? 'union' : 'diff',
+                         nodes: [S.nodeOf(ent), nodo] },
+                       { layer: ent.layer, color: ent.color });
+      var res = S.meshOf(e2);
+      if (!res || !res.faces.length) { ctx.doc.discardTx(); ctx.err('El resultado está vacío.'); return; }
+      ctx.doc.remove(ent);
+      addSolid(ctx, e2);
+      ctx.app.selSet = [e2];
+      ctx.out((d > 0 ? 'Cara tirada ' : 'Cara empujada ') + G.fmt(Math.abs(d), 4) +
+              '   volumen ' + G.fmt(Math.abs(res.volume()), 4));
+      return;
+    }
+
+    /* ---- contorno 2D cerrado ---- */
     var pr = S.profileOf(r.ent, ctx.doc, 'high');
     if (!pr || pr.length < 3) { ctx.err('El objeto no delimita un área cerrada.'); return; }
     var h = await ctx.getDist('Precise altura de extrusión');
     if (!num(h)) return;
     ctx.doc.mark('PULSARTIRAR');
-    var mesh = M.extrude(pr, v3(0, 0, h));
-    if (!mesh) { ctx.doc.discardTx(); ctx.err('No se ha podido extruir.'); return; }
-    addSolid(ctx, S.fromMesh(mesh, { layer: r.ent.layer, color: r.ent.color }));
+    var m2 = M.extrude(pr, v3(0, 0, h));
+    if (!m2) { ctx.doc.discardTx(); ctx.err('No se ha podido extruir.'); return; }
+    addSolid(ctx, S.fromMesh(m2, { layer: r.ent.layer, color: r.ent.color }));
     ctx.doc.remove(r.ent);
-    ctx.out('Volumen ' + G.fmt(Math.abs(mesh.volume()), 3));
+    ctx.out('Volumen ' + G.fmt(Math.abs(m2.volume()), 3));
   });
+
+  /* Índice de la cara señalada: con el rayo del cursor si estamos en 3D,
+     y si no, la cara más cercana al punto de designación. */
+  function caraSenalada(ctx, ent, mesh, r) {
+    var app = ctx.app;
+    if (app.is3D && app.view3d && app.cursorScreen) {
+      var ray = app.view3d.cam.ray(app.cursorScreen.x, app.cursorScreen.y, app.view3d.W, app.view3d.H);
+      if (ray) {
+        var h = mesh.pickFace(ray.org, ray.dir);
+        if (h) return h.face;
+      }
+    }
+    var p = r.p ? v3(r.p.x, r.p.y, r.p.z || 0) : null;
+    if (!p) return null;
+    var best = null, bd = Infinity;
+    for (var i = 0; i < mesh.faces.length; i++) {
+      var c = mesh.faceCenter(mesh.faces[i]);
+      var d = G3.dist2(c, p);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
 
   /* ============================================================
      BOOLEANOS 3D
@@ -1091,6 +1184,69 @@
     ctx.app.ui.togglePalette('arbol', true);
     ctx.out('Árbol de operaciones: cambie una medida y la pieza se reconstruye; ' +
             'el círculo de la izquierda suprime o restituye la operación.');
+  });
+
+
+  /* ------------------------------------------------------------
+     PLANOTRABAJO — plano de referencia para construir en 3D
+     ------------------------------------------------------------ */
+  Cmd.add(['PLANOTRABAJO', 'WORKPLANE', 'PLANOT', 'SCPCARA'],
+  { group: '3d', icon: 'plane', title: 'Plano de trabajo', transparent: true },
+  async function (ctx) {
+    var W = CAD.WPlane;
+    var k = await ctx.getKeyword('Plano de trabajo',
+      ['Cara', '3puntos', 'XY', 'YZ', 'ZX', 'Vista', 'Global'], { def: 'Cara' });
+    if (!k) return;
+    var kw = k.kw, doc = ctx.doc;
+
+    if (kw === 'G') { W.clear(doc); ctx.app.refresh(true); ctx.out('Plano de trabajo: el XY global.'); return; }
+    if (kw === 'XY' || kw === 'YZ' || kw === 'ZX') {
+      var o = await ctx.getPoint('Precise el origen del plano', { def: { x: 0, y: 0 } });
+      if (!pt(o)) o = { x: 0, y: 0, z: 0 };
+      W.set(doc, W.principal(kw, { x: o.x, y: o.y, z: o.z || 0 }));
+      ctx.app.refresh(true);
+      ctx.out('Plano de trabajo ' + kw + '.');
+      return;
+    }
+    if (kw === 'V') {
+      if (!ctx.app.is3D || !ctx.app.view3d) { ctx.err('La opción Vista sólo tiene sentido en el espacio 3D.'); return; }
+      var cam = ctx.app.view3d.cam;
+      W.set(doc, W.fromNormal(cam.target, cam.dir, null));
+      ctx.app.refresh(true);
+      ctx.out('Plano de trabajo paralelo a la pantalla.');
+      return;
+    }
+    if (kw === '3') {
+      var a = await ctx.getPoint('Precise el origen del plano'); if (!pt(a)) return;
+      var b = await ctx.getPoint('Precise un punto del eje X', { base: a }); if (!pt(b)) return;
+      var c = await ctx.getPoint('Precise un punto del lado positivo de Y', { base: a }); if (!pt(c)) return;
+      var pl = W.from3Points(v3(a.x, a.y, a.z || 0), v3(b.x, b.y, b.z || 0), v3(c.x, c.y, c.z || 0));
+      if (!pl) { ctx.err('Los tres puntos son colineales.'); return; }
+      W.set(doc, pl);
+      ctx.app.refresh(true);
+      ctx.out('Plano de trabajo por tres puntos.');
+      return;
+    }
+    /* Cara de un sólido */
+    var r = await ctx.getEntity('Designe una cara de un sólido', {
+      filter: function (x) { return S.is3D(x); }
+    });
+    if (!r || !r.ent) return;
+    var mesh = S.meshOf(r.ent);
+    if (!mesh) { ctx.err('El sólido no tiene malla.'); return; }
+    var fi = caraSenalada(ctx, r.ent, mesh, r);
+    if (fi === null) { ctx.err('No se ha podido determinar la cara.'); return; }
+    var reg = mesh.planarRegion(fi);
+    var cen = mesh.faceCenter(mesh.faces[fi]);
+    /* el eje X del plano sigue la primera arista de la cara, que es lo
+       que da una orientación previsible al dibujar encima */
+    var f = mesh.faces[fi];
+    var ejeX = G3.sub(mesh.verts[f[1]], mesh.verts[f[0]]);
+    W.set(doc, W.fromNormal(cen, reg.n, ejeX));
+    ctx.app.refresh(true);
+    ctx.out('Plano de trabajo sobre la cara designada.  Normal ' +
+            G.fmt(reg.n.x, 4) + ', ' + G.fmt(reg.n.y, 4) + ', ' + G.fmt(reg.n.z, 4) +
+            '.   PLANOTRABAJO Global lo devuelve al XY.');
   });
 
 })();

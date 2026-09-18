@@ -67,7 +67,32 @@
   CAD.num = num;
 
   /* Devuelve {p} | {dist} | null */
+  /* ------------------------------------------------------------
+     Con un plano de trabajo activo, lo que se teclea son coordenadas
+     DEL PLANO, igual que un croquis de SolidWorks o que el SCP de
+     AutoCAD.  Con el prefijo * se escriben en coordenadas del mundo.
+     ------------------------------------------------------------ */
   CAD.parsePoint = function (txt, app, base, dir) {
+    var pl = (CAD.WPlane && app && app.doc) ? CAD.WPlane.get(app.doc) : null;
+    if (!pl || String(txt).trim()[0] === '*') return parsePointRaw(txt, app, base, dir);
+
+    var W = CAD.WPlane, G3 = CAD.G3;
+    /* la base se lleva a coordenadas del plano para que @ sea relativo
+       dentro del propio plano */
+    var baseP = base ? W.toPlane(pl, G3.v(base.x, base.y, base.z || 0)) : null;
+    var lastP = app.lastPoint ? W.toPlane(pl, G3.v(app.lastPoint.x, app.lastPoint.y, app.lastPoint.z || 0)) : null;
+    var falso = {
+      doc: app.doc, lastPoint: lastP ? { x: lastP.u, y: lastP.v, z: lastP.w } : null,
+      ignoreUCS: true, cursorWorld: app.cursorWorld
+    };
+    var r = parsePointRaw(txt, falso, baseP ? { x: baseP.u, y: baseP.v, z: baseP.w } : null, dir);
+    if (!r || !r.p) return r;
+    var w = W.toWorld(pl, r.p.x, r.p.y);
+    if (r.p.z) { w = G3.add(w, G3.mul(G3.v(pl.n.x, pl.n.y, pl.n.z), r.p.z)); }
+    return { p: { x: w.x, y: w.y, z: w.z } };
+  };
+
+  function parsePointRaw(txt, app, base, dir) {
     var s = String(txt).trim();
     if (!s) return null;
     var rel = false, wcs = false;
@@ -132,7 +157,8 @@
     var dd = num(s);
     if (!isNaN(dd)) return { dist: dd };
     return null;
-  };
+  }
+  CAD.parsePointRaw = parsePointRaw;
 
   /* Forma abreviada de una opción, como la escribe AutoCAD: las letras
      en mayúscula, más las cifras que van delante ("2P" -> 2P,

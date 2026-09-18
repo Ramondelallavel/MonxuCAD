@@ -159,6 +159,7 @@
     if (app.view3d.showCube)
       app.cubeHits = V3.drawCube(ctx, app.view3d.cam, W - 132, 16, 108);
     if (app.view3d.showUcs) V3.drawUcsIcon(ctx, app.view3d.cam, W, H);
+    if (CAD.WPlane) CAD.WPlane.draw(ctx, app);
     if (CAD.Pick3D) {
       CAD.Pick3D.drawHover(ctx, app);
       CAD.Pick3D.drawSnap(ctx, app);
@@ -346,7 +347,7 @@
         self.cursorWorld = { x: h.p.x, y: h.p.y, z: h.p.z };
         return self.cursorWorld;
       }
-      var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
+      var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0, self.doc);
       if (gp) self.cursorWorld = { x: gp.x, y: gp.y, z: gp.z };
       return self.cursorWorld;
     }
@@ -417,7 +418,7 @@
           self.hoverEnt = null;
         } else {
           self.snap3d = null;
-          var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
+          var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0, self.doc);
           if (gp) { self.cursorWorld = { x: gp.x, y: gp.y, z: gp.z }; self.ui.setCoords && self.ui.setCoords(gp); }
           /* realce del objeto bajo el cursor */
           if (self.doc.vars.SELECTIONPREVIEW !== 0 && CAD.Pick3D)

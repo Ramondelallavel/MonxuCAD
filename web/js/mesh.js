@@ -91,6 +91,108 @@
     return out;
   };
 
+  /* ------------------------------------------------------------
+     Cara señalada por un rayo.  rayHit devuelve el triángulo; para el
+     modelado directo hace falta el polígono original, que es lo que el
+     usuario percibe como "una cara".
+     ------------------------------------------------------------ */
+  Mesh.prototype.pickFace = function (org, dir) {
+    if (!G3.boxHit(this.bbox(), org, dir)) return null;
+    var best = null;
+    for (var i = 0; i < this.faces.length; i++) {
+      var f = this.faces[i];
+      if (f.length < 3) continue;
+      for (var j = 1; j + 1 < f.length; j++) {
+        var h = G3.rayTri(org, dir, this.verts[f[0]], this.verts[f[j]], this.verts[f[j + 1]], true);
+        if (h && (!best || h.t < best.t)) { best = { t: h.t, p: h.p, face: i }; }
+      }
+    }
+    return best;
+  };
+
+  /* Región plana conexa a la que pertenece una cara: todas las caras
+     vecinas que comparten su plano.  Es lo que empuja o tira el modelado
+     directo, no un único triángulo. */
+  Mesh.prototype.planarRegion = function (fi, tolDeg) {
+    var lim = Math.cos((tolDeg === undefined ? 0.5 : tolDeg) * Math.PI / 180);
+    var n0 = this.faceNormal(this.faces[fi]);
+    var w0 = G3.dot(n0, this.verts[this.faces[fi][0]]);
+    /* mapa de arista -> caras */
+    var em = new Map();
+    for (var i = 0; i < this.faces.length; i++) {
+      var f = this.faces[i];
+      for (var j = 0; j < f.length; j++) {
+        var a = f[j], b = f[(j + 1) % f.length];
+        var k = a < b ? a + ',' + b : b + ',' + a;
+        var e = em.get(k); if (!e) { e = []; em.set(k, e); }
+        e.push(i);
+      }
+    }
+    var visto = {}, pila = [fi], out = [];
+    visto[fi] = 1;
+    while (pila.length) {
+      var ci = pila.pop();
+      out.push(ci);
+      var cf = this.faces[ci];
+      for (j = 0; j < cf.length; j++) {
+        var aa = cf[j], bb = cf[(j + 1) % cf.length];
+        var kk = aa < bb ? aa + ',' + bb : bb + ',' + aa;
+        var vec = em.get(kk) || [];
+        for (var q = 0; q < vec.length; q++) {
+          var vi = vec[q];
+          if (visto[vi]) continue;
+          var nv = this.faceNormal(this.faces[vi]);
+          if (G3.dot(nv, n0) < lim) continue;
+          if (Math.abs(G3.dot(nv, this.verts[this.faces[vi][0]]) - w0) > 1e-6 * Math.max(1, Math.abs(w0))) continue;
+          visto[vi] = 1; pila.push(vi);
+        }
+      }
+    }
+    return { faces: out, n: n0, w: w0 };
+  };
+
+  /* Contornos de una región plana: las aristas que sólo pertenecen a una
+     cara de la región, encadenadas en bucles. */
+  Mesh.prototype.regionLoops = function (faces) {
+    var dentro = {}; faces.forEach(function (i) { dentro[i] = 1; });
+    var cuenta = new Map();
+    var self = this;
+    faces.forEach(function (i) {
+      var f = self.faces[i];
+      for (var j = 0; j < f.length; j++) {
+        var a = f[j], b = f[(j + 1) % f.length];
+        var k = a < b ? a + ',' + b : b + ',' + a;
+        var e = cuenta.get(k); if (!e) { e = { n: 0, a: a, b: b, dir: null }; cuenta.set(k, e); }
+        e.n++;
+        if (e.n === 1) e.dir = [a, b];
+      }
+    });
+    var bordes = [];
+    cuenta.forEach(function (e) { if (e.n === 1) bordes.push(e.dir); });
+    if (!bordes.length) return [];
+    /* encadena */
+    var porIni = new Map();
+    bordes.forEach(function (e) {
+      var l = porIni.get(e[0]); if (!l) { l = []; porIni.set(e[0], l); }
+      l.push(e);
+    });
+    var usados = new Set(), loops = [];
+    for (var i = 0; i < bordes.length; i++) {
+      if (usados.has(bordes[i])) continue;
+      var loop = [bordes[i][0]], cur = bordes[i], guard = 0;
+      usados.add(cur);
+      while (guard++ < 100000) {
+        loop.push(cur[1]);
+        var sig = (porIni.get(cur[1]) || []).filter(function (x) { return !usados.has(x); })[0];
+        if (!sig) break;
+        usados.add(sig); cur = sig;
+        if (cur[1] === loop[0]) { break; }
+      }
+      if (loop.length >= 3) loops.push(loop);
+    }
+    return loops;
+  };
+
   /* Reinserta los vértices de la cara que la triangulación descartó.
      Sólo se parten aristas del CONTORNO del polígono, nunca diagonales
      interiores: el contorno lo comparte la cara vecina, que hace el mismo
