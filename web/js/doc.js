@@ -325,7 +325,7 @@
   };
   Doc.prototype.mark = function (label) {
     this.commitTx();
-    this._tx = { label: label || '', ops: [], mods: new Map(), meta: this.metaSnapshot() };
+    this._tx = { label: label || '', ops: [], mods: new Map(), orders: [], meta: this.metaSnapshot() };
     this.redoStack.length = 0;
     /* captura automática: lo que el comando ya tiene designado o ha
        señalado hasta ahora es lo que puede modificar en el sitio */
@@ -340,11 +340,24 @@
   /* Abandona la transacción en curso sin registrarla (el comando no hizo nada) */
   Doc.prototype.discardTx = function () { this._tx = null; };
 
+  function ordenCambia(tx) {
+    var L = tx.orders;
+    if (!L || !L.length) return false;
+    for (var i = 0; i < L.length; i++) {
+      var a = L[i].arr, b = L[i].prev;
+      if (a.length !== b.length) return true;
+      for (var j = 0; j < a.length; j++) if (a[j] !== b[j]) return true;
+    }
+    return false;
+  }
+
   Doc.prototype.commitTx = function () {
     var tx = this._tx;
     this._tx = null;
     if (!tx) return null;
-    if (!tx.ops.length && !tx.mods.size && !metaDiffers(tx.meta, this)) return null;
+    /* un cambio de sólo orden no toca ningún objeto: sin esto se tiraba la
+       transacción por "vacía" y deshacer no lo devolvía */
+    if (!tx.ops.length && !tx.mods.size && !ordenCambia(tx) && !metaDiffers(tx.meta, this)) return null;
     this.undoStack.push(tx);
     if (this.undoStack.length > 120) this.undoStack.shift();
     return tx;
@@ -372,8 +385,20 @@
   }
 
   /* Invierte una transacción y devuelve la inversa (para rehacer) */
+  /* Apunta el orden de dibujo actual para poder devolverlo.  Cambiar sólo
+     el orden de la lista no tocaba ningún objeto y no dejaba rastro en el
+     histórico: deshacer no lo devolvía. */
+  Doc.prototype.touchOrder = function (arr) {
+    var tx = this._tx;
+    if (!tx) return;
+    arr = arr || this.ents();
+    if (!tx.orders) tx.orders = [];
+    for (var i = 0; i < tx.orders.length; i++) if (tx.orders[i].arr === arr) return;
+    tx.orders.push({ arr: arr, prev: arr.slice() });
+  };
+
   Doc.prototype.applyInverse = function (tx) {
-    var inv = { label: tx.label, ops: [], mods: new Map(), meta: this.metaSnapshot() };
+    var inv = { label: tx.label, ops: [], mods: new Map(), orders: [], meta: this.metaSnapshot() };
     /* objetos modificados: se guarda el estado actual y se restaura el anterior */
     tx.mods.forEach(function (before, ent) {
       inv.mods.set(ent, deep(ent));
@@ -393,6 +418,22 @@
         inv.ops.push({ k: 'a', arr: op.arr, e: op.e, i: op.i });
       }
     }
+    /* el orden, después de las altas y bajas: sólo se recolocan los que
+       siguen estando, y lo que haya aparecido se queda al final */
+    (tx.orders || []).forEach(function (o) {
+      var arr = o.arr;
+      inv.orders.push({ arr: arr, prev: arr.slice() });
+      var pos = new Map();
+      o.prev.forEach(function (e, i) { pos.set(e, i); });
+      var viejos = [], nuevos = [];
+      for (var q = 0; q < arr.length; q++) {
+        if (pos.has(arr[q])) viejos.push(arr[q]); else nuevos.push(arr[q]);
+      }
+      viejos.sort(function (a, b) { return pos.get(a) - pos.get(b); });
+      var res = viejos.concat(nuevos);
+      arr.length = 0;
+      for (var w = 0; w < res.length; w++) arr.push(res[w]);
+    });
     this.metaRestore(tx.meta);
     this.rev++;
     this.dirty = true;

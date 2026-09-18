@@ -333,6 +333,7 @@
     var mover = lista.filter(function (e) { return quiere.indexOf(e.type) >= 0; });
     if (!mover.length) { ctx.out('No hay nada que traer al frente.'); return; }
     ctx.doc.mark('TEXTOALFRENTE');
+    ctx.doc.touchOrder(lista);
     mover.forEach(function (e) {
       var i = lista.indexOf(e);
       if (i >= 0) { lista.splice(i, 1); lista.push(e); }

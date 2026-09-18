@@ -722,13 +722,16 @@
     if (!o) return;
     ctx.doc.mark('ORDENAOBJETOS');
     var list = ctx.doc.ents();
+    ctx.doc.touchOrder(list);
     sel.forEach(function (e) {
       var i = list.indexOf(e);
       if (i >= 0) list.splice(i, 1);
     });
     if (o.kw === 'EDT' || o.kw === 'E') sel.forEach(function (e) { list.push(e); });
     else sel.slice().reverse().forEach(function (e) { list.unshift(e); });
-    ctx.app.refresh();
+    ctx.doc.rev++;               /* si no, el dibujo no se repinta */
+    ctx.app.refresh(true);
+    ctx.out(sel.length + ' objeto(s) ' + (o.kw === 'EDT' || o.kw === 'E' ? 'encima de todo.' : 'debajo de todo.'));
   });
 
   Cmd.add(['MEDIRGEOM', 'MEASUREGEOM', 'MEA'], { group: 'inquiry', icon: 'dist', title: 'Medir geometría', transparent: true }, async function (ctx) {
