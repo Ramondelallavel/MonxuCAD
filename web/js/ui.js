@@ -567,16 +567,20 @@
     this.el.tabs.innerHTML = RIBBON.map(function (t) {
       return '<button class="rtab' + (t.id === self.activeTab ? ' active' : '') + '" role="tab" data-tab="' + t.id + '">' + t.label + '</button>';
     }).join('');
-    this.el.tabs.addEventListener('click', function (e) {
+    /* Asignación, no addEventListener: buildRibbon se vuelve a llamar en
+       cada cambio de pestaña y al entrar o salir del 3D.  Enganchando el
+       oyente se duplicaban en cada pasada (1, 2, 4, 8... reconstrucciones
+       por clic) y la cinta acababa bloqueando la aplicación. */
+    this.el.tabs.onclick = function (e) {
       var b = e.target.closest('[data-tab]');
       if (!b) return;
       self.activeTab = b.dataset.tab;
       self.buildRibbon();
       self.el.input.focus();
-    });
-    this.el.tabs.addEventListener('dblclick', function () {
+    };
+    this.el.tabs.ondblclick = function () {
       self.el.ribbon.classList.toggle('collapsed');
-    });
+    };
 
     var tab = RIBBON.filter(function (t) { return t.id === self.activeTab; })[0] || RIBBON[0];
     var html = '';
@@ -2398,7 +2402,11 @@
     var close = document.getElementById('palClose');
     if (close) close.addEventListener('click', function () { self.togglePalette('props', false); });
 
-    p.addEventListener('change', function (e) {
+    /* El contenedor de paletas no se destruye al repintar: con
+       addEventListener se acumulaba un oyente por cada repintado y cada
+       cambio de propiedad se aplicaba también a las designaciones
+       anteriores, marcando el histórico varias veces. */
+    p.onchange = function (e) {
       var t = e.target;
       if (!t.id) return;
       doc.mark('PROPIEDADES');
@@ -2415,7 +2423,7 @@
       });
       app.refresh();
       self.renderProps();
-    });
+    };
 
     function row(label, control) {
       return '<div class="prop-row"><label>' + label + '</label><div class="val">' + control + '</div></div>';
@@ -2979,14 +2987,14 @@
 
     var pc = document.getElementById('palClose2');
     if (pc) pc.addEventListener('click', function () { self.togglePalette('blocks', false); });
-    this.el.palettes.addEventListener('click', function (e) {
+    this.el.palettes.onclick = function (e) {
       var t = e.target.closest('[data-cat]');
       if (t) { self.blockCat = t.dataset.cat; self.renderBlocks(); return; }
       var b = e.target.closest('[data-blk]');
       if (b) { self.insertLibraryBlock(b.dataset.blk); return; }
       var d = e.target.closest('[data-doc]');
       if (d) { app.insertBlockByName(d.dataset.doc); }
-    });
+    };
   };
 
   UI.prototype.insertLibraryBlock = function (name) {

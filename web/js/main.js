@@ -292,6 +292,12 @@
 
       self.updateCursor(sp, e);
 
+      /* Ventana abierta con un primer clic: este clic la cierra, caiga
+         donde caiga.  Antes, si el segundo clic tocaba un objeto o un
+         pinzamiento, la ventana se quedaba viva con un origen viejo y
+         emboscaba a la siguiente designación. */
+      if (self.pendBox) { self.closePendBox(sp, e.shiftKey); return; }
+
       /* pinzamiento bajo el cursor: entra en modo de edición */
       if (self.hoverGrip && !self.pending) {
         self.enterGripEdit(self.hoverGrip);
@@ -330,7 +336,15 @@
          (PICKDRAG = 2): pulsar y arrastrar, o dar un clic, mover y dar
          otro clic.  La segunda es la de fábrica y es la que se echaba
          en falta aquí. */
-      if (self.pendBox) { self.closePendBox(sp, e.shiftKey); return; }
+      /* Pulsar en el vacío sin ningún comando en curso deshace la
+         designación actual: es como se quitan los pinzamientos en
+         AutoCAD.  Con Mayús se conserva, porque Mayús resta. */
+      if (!self.pending && !e.shiftKey && self.selSet.length) {
+        self.selSet = [];
+        self.hoverGrip = null; self.hotGrip = null;
+        self.gripMode = 0; self.gripCopy = false;
+        self.refresh();
+      }
       drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey, path: [sp], plen: 0 };
     });
 
@@ -424,7 +438,12 @@
           /* clic sin arrastre sobre el vacío: queda a la espera del
              segundo clic para cerrar la ventana */
           self.pendBox = { start: drag.start, startScreen: drag.startScreen,
-                           shift: drag.shift, path: [drag.startScreen], plen: 0, t: Date.now() };
+                           shift: drag.shift, path: [drag.startScreen], plen: 0, t: Date.now(),
+                           prompt: self.promptText };
+          /* AutoCAD avisa de que está esperando la esquina opuesta; sin
+             ese aviso el usuario no entiende por qué el clic siguiente
+             no designa lo que hay debajo. */
+          self.setPrompt('Precise esquina opuesta: ');
           drag = null;
           self.refresh();
           return;
@@ -500,6 +519,7 @@
     var pb = this.pendBox;
     this.pendBox = null;
     if (!pb) return;
+    if (pb.prompt != null) this.setPrompt(pb.prompt);
     var moved = Math.abs(sp.x - pb.startScreen.x) > 3 || Math.abs(sp.y - pb.startScreen.y) > 3;
     if (!moved) {
       /* dos clics en el mismo sitio: se entiende como "no designar nada" */
@@ -538,6 +558,8 @@
 
   App.prototype.clearPendBox = function () {
     if (!this.pendBox) return;
+    if (this.pendBox.prompt != null && this.promptText === 'Precise esquina opuesta: ')
+      this.setPrompt(this.pendBox.prompt);
     this.pendBox = null;
     this.pickBox = null;
     this.lassoPath = null;
