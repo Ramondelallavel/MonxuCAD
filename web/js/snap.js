@@ -256,14 +256,30 @@
       });
     }
 
-    if (!cands.length) return null;
+    if (!cands.length) { app.snapCands = []; return null; }
     cands.sort(function (a, b) {
       var pa = PRIORITY.indexOf(a.type), pb = PRIORITY.indexOf(b.type);
       if (pa !== pb) return pa - pb;
       return a.d - b.d;
     });
-    var best = cands[0];
-    return { type: best.type, p: { x: best.p.x, y: best.p.y }, ent: best.ent, label: CAD.SNAP_LABEL[best.type] || best.type };
+    /* Se quitan los repetidos: dos objetos que comparten un extremo dan
+       la misma captura y el recorrido con el tabulador se atascaría. */
+    var uniq = [];
+    for (var ui = 0; ui < cands.length; ui++) {
+      var cu = cands[ui], dup = false;
+      for (var uj = 0; uj < uniq.length; uj++) {
+        if (uniq[uj].type === cu.type && G.dist(uniq[uj].p, cu.p) < 1e-9) { dup = true; break; }
+      }
+      if (!dup) uniq.push(cu);
+      if (uniq.length >= 12) break;
+    }
+    app.snapCands = uniq;
+    /* El tabulador recorre las capturas bajo la mira, como en AutoCAD */
+    var idx = app.snapTab ? (app.snapTab % uniq.length) : 0;
+    var best = uniq[idx];
+    return { type: best.type, p: { x: best.p.x, y: best.p.y }, ent: best.ent,
+             label: (CAD.SNAP_LABEL[best.type] || best.type) +
+                    (uniq.length > 1 ? '   (' + (idx + 1) + '/' + uniq.length + ', Tab)' : '') };
   };
 
   function primBox(pr) {

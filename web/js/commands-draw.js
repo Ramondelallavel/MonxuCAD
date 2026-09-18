@@ -227,6 +227,7 @@
   }
   CAD.circ3 = circ3;
 
+  CAD.tanTanRadius = tanTanRadius;
   function tanTanRadius(ctx, e1, e2, r) {
     var doc = ctx.doc;
     var p1 = CAD.Prim.of(e1.ent, doc)[0], p2 = CAD.Prim.of(e2.ent, doc)[0];

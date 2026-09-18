@@ -74,6 +74,11 @@
     if (s[0] === '@') { rel = true; s = s.slice(1); }
     if (s[0] === '*') { wcs = true; s = s.slice(1); }
     var last = base || app.lastPoint || { x: 0, y: 0 };
+    /* "@" a secas es el último punto, como en AutoCAD */
+    if (rel && !s) {
+      return { p: { x: last.x, y: last.y,
+                    z: last.z !== undefined ? last.z : ((app.doc && app.doc.vars.ELEVATION) || 0) } };
+    }
     var doc = app.doc;
     var ucs = (CAD.UCS && doc && !wcs) ? CAD.UCS : null;
     var ub = (ucs && !app.ignoreUCS) ? (doc.vars.UCSANG || 0) : 0;
@@ -129,9 +134,20 @@
     return null;
   };
 
+  /* Forma abreviada de una opción, como la escribe AutoCAD: las letras
+     en mayúscula, más las cifras que van delante ("2P" -> 2P,
+     "3puntos" -> 3, "ambos Lados" -> AL).  Antes las cifras se
+     descartaban y "2P" y "3P" acababan siendo la misma opción, de modo
+     que teclear 2P o 3P cancelaba el comando en lugar de elegirla. */
   function kwShort(k) {
-    var up = k.replace(/[^A-ZÁÉÍÓÚÑ]/g, '');
-    return up || k[0].toUpperCase();
+    var out = '', vistaMin = false;
+    for (var i = 0; i < k.length; i++) {
+      var c = k[i];
+      if (c >= '0' && c <= '9') { if (!vistaMin) out += c; continue; }
+      if (/[A-ZÁÉÍÓÚÑ]/.test(c)) { out += c; continue; }
+      if (/[a-záéíóúñ]/.test(c)) vistaMin = true;
+    }
+    return out || k[0].toUpperCase();
   }
   CAD.kwShort = kwShort;
 
@@ -293,7 +309,18 @@
   /* --- Un solo objeto --- */
   Ctx.prototype.getEntity = function (msg, opts) {
     var self = this;
-    return this._ask('entity', msg, opts || {}).then(function (r) {
+    opts = opts || {};
+    /* Objeto entregado por un doble clic: el comando lo toma sin volver
+       a preguntar, igual que hace AutoCAD (DBLCLKEDIT). */
+    var pre = this.app.pickedEntity;
+    if (pre && pre.ent) {
+      this.app.pickedEntity = null;
+      if (!opts.filter || opts.filter(pre.ent)) {
+        this._see([pre.ent]);
+        return Promise.resolve({ ent: pre.ent, p: pre.p || null, shift: false });
+      }
+    }
+    return this._ask('entity', msg, opts).then(function (r) {
       if (r && r.ent) self._see([r.ent]);
       return r;
     });
@@ -399,6 +426,7 @@
   };
 
   Engine.finishCommand = function (seq) {
+    this.pickedEntity = null;
     /* si entretanto se inició otro comando, no se toca su estado */
     if (seq !== undefined && seq !== this.cmdSeq) return;
     if (this.doc && this.doc.commitTx) this.doc.commitTx();
@@ -422,6 +450,7 @@
   };
 
   Engine.cancel = function (silent) {
+    this.pickedEntity = null;
     if (this.clearPendBox) this.clearPendBox();
     this.mtpCollect = null;
     this.osnapOverride = null;
@@ -568,7 +597,7 @@
 
     /* referencia "punto medio entre 2 puntos" */
     if (this.mtpCollect) {
-      this.mtpCollect.push({ x: pt.x, y: pt.y });
+      this.mtpCollect.push({ x: pt.x, y: pt.y, z: pt.z });
       if (this.mtpCollect.length < 2) {
         this.setPrompt('Segundo punto del medio: ');
         this.refresh();
@@ -577,6 +606,7 @@
       var a = this.mtpCollect[0], b = this.mtpCollect[1];
       this.mtpCollect = null;
       pt = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      if (a.z !== undefined || b.z !== undefined) pt.z = ((a.z || 0) + (b.z || 0)) / 2;
       this.setPrompt(p.text);
     }
     /* referencia a objeto usada: permite cotas asociativas */
@@ -584,9 +614,15 @@
       ? { ent: this.snapHit.ent, type: this.snapHit.type, p: { x: this.snapHit.p.x, y: this.snapHit.p.y } }
       : null;
     this.osnapOverride = null;
-    this.lastPoint = { x: pt.x, y: pt.y };
+    /* La cota Z viaja con el punto: sin esto, escribir 0,0,25 llegaba a
+       los comandos como 0,0 y todo el modelado 3D por teclado quedaba
+       aplastado sobre el plano actual. */
+    var out = { x: pt.x, y: pt.y };
+    if (typeof pt.z === 'number' && isFinite(pt.z)) out.z = pt.z;
+    this.lastPoint = { x: out.x, y: out.y };
+    if (out.z !== undefined) this.lastPoint.z = out.z;
     if (p.opts.base) this.lastDir = G.ang(p.opts.base, pt);
-    this.resolve({ x: pt.x, y: pt.y });
+    this.resolve(out);
   };
 
   /* ---------- Enter / Espacio ---------- */

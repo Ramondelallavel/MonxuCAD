@@ -94,25 +94,123 @@
     return [{ x: a.x, y: a.y }, { x: b.x, y: a.y }, { x: b.x, y: b.y }, { x: a.x, y: b.y }];
   }
 
-  Cmd.add(['CILINDRO', 'CYLINDER'], { group: '3d', icon: 'cyl3d', title: 'Cilindro' },
-  async function (ctx) {
-    var c = await ctx.getPoint('Precise centro de la base o', { keywords: ['3P', '2P', 'Ttr', 'Elíptico'] });
-    if (!pt(c)) return;
+  /* ------------------------------------------------------------
+     Base circular de un sólido de revolución.  Admite las mismas
+     opciones que AutoCAD (3P, 2P, Ttr y, donde procede, Elíptico)
+     además del centro y el radio.  Antes esas opciones se anunciaban
+     en la petición pero no estaban implementadas, así que elegir una
+     cancelaba el comando sin decir nada.
+     Devuelve {c, r} o {elipse:[puntos]} o null.
+     ------------------------------------------------------------ */
+  async function baseCircle(ctx, msg, opts) {
+    opts = opts || {};
+    var kws = ['3P', '2P', 'Ttr'];
+    if (opts.elliptic) kws.push('Elíptico');
+    var r0 = await ctx.getPoint(msg, { keywords: kws });
+    if (r0 === null) return null;
+
+    if (!isKw(r0)) return await radiusOf(ctx, r0);
+
+    if (r0.kw === '3P') {
+      var a = await ctx.getPoint('Precise primer punto'); if (!pt(a)) return null;
+      var b = await ctx.getPoint('Precise segundo punto', { base: a }); if (!pt(b)) return null;
+      var c3 = await ctx.getPoint('Precise tercer punto', {
+        base: b, preview: function (q) { var k = CAD.circ3(a, b, q); return k ? [E.circle(k.c, k.r)] : []; }
+      });
+      if (!pt(c3)) return null;
+      var k3 = CAD.circ3(a, b, c3);
+      if (!k3) { ctx.err('Los puntos son colineales.'); return null; }
+      return { c: k3.c, r: k3.r };
+    }
+    if (r0.kw === '2P') {
+      var d1 = await ctx.getPoint('Precise primer extremo del diámetro'); if (!pt(d1)) return null;
+      var d2 = await ctx.getPoint('Precise segundo extremo del diámetro', {
+        base: d1, preview: function (q) { return [E.circle(G.mid(d1, q), G.dist(d1, q) / 2)]; }
+      });
+      if (!pt(d2)) return null;
+      var rr = G.dist(d1, d2) / 2;
+      if (rr <= 0) return null;
+      return { c: G.mid(d1, d2), r: rr };
+    }
+    if (r0.kw === 'T') {
+      var t1 = await ctx.getEntity('Precise punto en objeto para la primera tangente'); if (!t1) return null;
+      var t2 = await ctx.getEntity('Precise punto en objeto para la segunda tangente'); if (!t2) return null;
+      var rt = await ctx.getReal('Precise radio', { def: ctx.app.lastRadius || 10 });
+      if (!num(rt) || rt <= 0) return null;
+      var sol = CAD.tanTanRadius(ctx, t1, t2, rt);
+      if (!sol) { ctx.err('El círculo no existe.'); return null; }
+      ctx.app.lastRadius = rt;
+      return { c: sol, r: rt };
+    }
+    if (r0.kw === 'E') {
+      var ce = await ctx.getPoint('Precise centro de la elipse'); if (!pt(ce)) return null;
+      var ra = await ctx.getDist('Precise semieje mayor', { base: ce }); if (!num(ra) || ra <= 0) return null;
+      var rb = await ctx.getDist('Precise semieje menor', { base: ce }); if (!num(rb) || rb <= 0) return null;
+      var ang = await ctx.getAngle('Precise giro de la elipse', { base: ce, def: 0 });
+      if (ang === null) ang = 0;
+      var n = Math.max(16, M.segFor(Math.max(ra, rb)));
+      var per = [], co = Math.cos(ang), si = Math.sin(ang);
+      for (var i = 0; i < n; i++) {
+        var th = 2 * Math.PI * i / n, ex = ra * Math.cos(th), ey = rb * Math.sin(th);
+        per.push(v3(ce.x + ex * co - ey * si, ce.y + ex * si + ey * co, 0));
+      }
+      return { elipse: per, c: ce, r: Math.max(ra, rb) };
+    }
+    return null;
+  }
+
+  /* Radio (o diámetro) de una base ya centrada */
+  async function radiusOf(ctx, c) {
     var r = await ctx.getDist('Precise radio de la base o', {
       base: c, keywords: ['Diámetro'],
-      preview: function (p) { return [E.circle(c, G.dist(c, p))]; }
+      preview: function (q) { return [E.circle(c, Math.max(1e-9, G.dist(c, q)))]; }
     });
     if (isKw(r)) {
       var d = await ctx.getDist('Precise diámetro', { base: c });
-      if (!num(d)) return;
+      if (!num(d) || d <= 0) return null;
       r = d / 2;
     }
-    if (!num(r) || r <= 0) return;
-    var h = await ctx.getDist('Precise altura o', { base: c, keywords: ['2Puntos', 'Eje'] });
-    if (!num(h)) return;
+    if (!num(r) || r <= 0) return null;
+    return { c: c, r: r };
+  }
+
+  /* Altura de un sólido: admite 2Puntos como AutoCAD */
+  async function heightOf(ctx, c, extra) {
+    var kws = ['2Puntos'].concat(extra || []);
+    var h = await ctx.getDist('Precise altura o', { base: c, keywords: kws });
+    if (isKw(h)) {
+      if (h.kw === '2P') {
+        var a = await ctx.getPoint('Precise primer punto'); if (!pt(a)) return null;
+        var b = await ctx.getPoint('Precise segundo punto', { base: a }); if (!pt(b)) return null;
+        /* la altura se mide en el espacio, no sólo en el plano */
+        return { h: G3.dist(v3(a.x, a.y, a.z || 0), v3(b.x, b.y, b.z || 0)) };
+      }
+      return { kw: h.kw };
+    }
+    if (!num(h)) return null;
+    return { h: h };
+  }
+
+  Cmd.add(['CILINDRO', 'CYLINDER'], { group: '3d', icon: 'cyl3d', title: 'Cilindro' },
+  async function (ctx) {
+    var base = await baseCircle(ctx, 'Precise centro de la base o', { elliptic: true });
+    if (!base) return;
+    var hr = await heightOf(ctx, base.c);
+    if (!hr || !num(hr.h) || hr.h === 0) return;
+    var h = hr.h;
     ctx.doc.mark('CILINDRO');
-    var e = S.solid({ op: 'cylinder', r: r, h: h, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(c.x, c.y, z0(ctx));
+    var e;
+    if (base.elipse) {
+      e = S.solid({ op: 'extrude', prof: base.elipse, dir: { x: 0, y: 0, z: h } },
+                  { layer: ctx.doc.vars.CLAYER });
+      e.m = G3.mTrans(0, 0, z0(ctx));
+      addSolid(ctx, e);
+      ctx.out('Cilindro elíptico de altura ' + G.fmt(h, 3));
+      return;
+    }
+    var r = base.r;
+    e = S.solid({ op: 'cylinder', r: r, h: h, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
+    e.m = G3.mTrans(base.c.x, base.c.y, z0(ctx));
     addSolid(ctx, e);
     ctx.out('Cilindro Ø' + G.fmt(r * 2, 3) + ' × ' + G.fmt(h, 3) +
             '   volumen ' + G.fmt(Math.PI * r * r * h, 3));
@@ -120,14 +218,9 @@
 
   Cmd.add(['ESFERA', 'SPHERE'], { group: '3d', icon: 'sph3d', title: 'Esfera' },
   async function (ctx) {
-    var c = await ctx.getPoint('Precise centro o', { keywords: ['3P', '2P', 'Ttr'] });
-    if (!pt(c)) return;
-    var r = await ctx.getDist('Precise radio o', {
-      base: c, keywords: ['Diámetro'],
-      preview: function (p) { return [E.circle(c, G.dist(c, p))]; }
-    });
-    if (isKw(r)) { var d = await ctx.getDist('Precise diámetro', { base: c }); if (!num(d)) return; r = d / 2; }
-    if (!num(r) || r <= 0) return;
+    var base = await baseCircle(ctx, 'Precise centro o');
+    if (!base || !num(base.r)) return;
+    var c = base.c, r = base.r;
     ctx.doc.mark('ESFERA');
     var e = S.solid({ op: 'sphere', r: r, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
     e.m = G3.mTrans(c.x, c.y, z0(ctx));
@@ -137,25 +230,37 @@
 
   Cmd.add(['CONO', 'CONE'], { group: '3d', icon: 'cone3d', title: 'Cono' },
   async function (ctx) {
-    var c = await ctx.getPoint('Precise centro de la base o', { keywords: ['3P', '2P', 'Ttr', 'Elíptico'] });
-    if (!pt(c)) return;
-    var r = await ctx.getDist('Precise radio de la base o', {
-      base: c, keywords: ['Diámetro'],
-      preview: function (p) { return [E.circle(c, G.dist(c, p))]; }
-    });
-    if (isKw(r)) { var d = await ctx.getDist('Precise diámetro', { base: c }); if (!num(d)) return; r = d / 2; }
-    if (!num(r) || r <= 0) return;
-    var h = await ctx.getDist('Precise altura o', { base: c, keywords: ['2Puntos', 'Eje', 'Radio superior'] });
+    var base = await baseCircle(ctx, 'Precise centro de la base o', { elliptic: true });
+    if (!base) return;
     var rTop = 0;
-    if (isKw(h) && h.kw === 'R') {
-      rTop = await ctx.getDist('Precise radio superior', { base: c });
-      if (!num(rTop)) return;
-      h = await ctx.getDist('Precise altura', { base: c });
+    var hr = await heightOf(ctx, base.c, ['Radio superior']);
+    if (!hr) return;
+    if (hr.kw === 'R') {
+      rTop = await ctx.getDist('Precise radio superior', { base: base.c });
+      if (!num(rTop) || rTop < 0) return;
+      hr = await heightOf(ctx, base.c);
+      if (!hr) return;
     }
-    if (!num(h)) return;
+    if (!num(hr.h) || hr.h === 0) return;
+    var h = hr.h;
     ctx.doc.mark('CONO');
-    var e = S.solid({ op: 'cone', r: r, h: h, r2: rTop, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(c.x, c.y, z0(ctx));
+    var e;
+    if (base.elipse) {
+      /* cono elíptico: extrusión con estrechamiento hasta el radio superior */
+      var k = base.r > 1e-12 ? (base.r - rTop) / base.r : 1;
+      var cen = base.c, top = base.elipse.map(function (q) {
+        return v3(cen.x + (q.x - cen.x) * (1 - k), cen.y + (q.y - cen.y) * (1 - k), h);
+      });
+      e = S.solid({ op: 'loft', secs: [base.elipse, top], opts: { closedSections: true } },
+                  { layer: ctx.doc.vars.CLAYER });
+      e.m = G3.mTrans(0, 0, z0(ctx));
+      addSolid(ctx, e);
+      ctx.out((rTop ? 'Tronco de cono elíptico' : 'Cono elíptico') + ' de altura ' + G.fmt(h, 3));
+      return;
+    }
+    var r = base.r;
+    e = S.solid({ op: 'cone', r: r, h: h, r2: rTop, seg: M.segFor(r) }, { layer: ctx.doc.vars.CLAYER });
+    e.m = G3.mTrans(base.c.x, base.c.y, z0(ctx));
     addSolid(ctx, e);
     ctx.out((rTop ? 'Tronco de cono' : 'Cono') + ' Ø' + G.fmt(r * 2, 3) + ' × ' + G.fmt(h, 3));
   });
@@ -184,14 +289,20 @@
 
   Cmd.add(['TOROIDE', 'TORUS'], { group: '3d', icon: 'torus3d', title: 'Toroide' },
   async function (ctx) {
-    var c = await ctx.getPoint('Precise centro o', { keywords: ['3P', '2P', 'Ttr'] });
-    if (!pt(c)) return;
-    var R = await ctx.getDist('Precise radio o', { base: c, keywords: ['Diámetro'],
-      preview: function (p) { return [E.circle(c, G.dist(c, p))]; } });
-    if (isKw(R)) { var d = await ctx.getDist('Precise diámetro', { base: c }); if (!num(d)) return; R = d / 2; }
-    if (!num(R)) return;
+    var base = await baseCircle(ctx, 'Precise centro o');
+    if (!base || !num(base.r)) return;
+    var c = base.c, R = base.r;
     var r = await ctx.getDist('Precise radio del tubo o', { base: c, keywords: ['2Puntos', 'Diámetro'] });
-    if (isKw(r)) { var d2 = await ctx.getDist('Precise diámetro del tubo', { base: c }); if (!num(d2)) return; r = d2 / 2; }
+    if (isKw(r)) {
+      if (r.kw === '2P') {
+        var ta = await ctx.getPoint('Precise primer punto'); if (!pt(ta)) return;
+        var tb = await ctx.getPoint('Precise segundo punto', { base: ta }); if (!pt(tb)) return;
+        r = G.dist(ta, tb) / 2;
+      } else {
+        var d2 = await ctx.getDist('Precise diámetro del tubo', { base: c });
+        if (!num(d2)) return; r = d2 / 2;
+      }
+    }
     if (!num(r)) return;
     ctx.doc.mark('TOROIDE');
     var e = S.solid({ op: 'torus', R: R, r: r, seg: M.segFor(R) }, { layer: ctx.doc.vars.CLAYER });

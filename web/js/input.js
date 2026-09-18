@@ -58,6 +58,8 @@
        un campo de texto que no sea la propia línea de comandos.
        ------------------------------------------------------------ */
     document.addEventListener('keydown', function (e) {
+    /* El tabulador entre capturas lo gobierna main.js */
+    if (e.key === 'Tab') return;
       var t = e.target;
       if (inDialog(t)) return;
       if (isDynInput(t)) return;                 /* la entrada dinámica se gestiona sola */

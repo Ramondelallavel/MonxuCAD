@@ -460,12 +460,15 @@
       }
       var ent = self.pickAt(sp);
       if (!ent) return;
+      if (self.doc.vars.DBLCLKEDIT === 0) { self.selSet = [ent]; self.ui.togglePalette('props', true); self.refresh(); return; }
       self.selSet = [ent];
+      /* el objeto pulsado viaja con el comando: no se vuelve a preguntar */
+      self.pickedEntity = { ent: ent, p: self.r.s2w(sp) };
       if (ent.type === 'TEXT' || ent.type === 'MTEXT' || ent.type === 'DIMENSION') self.startCommand('EDITTEXTO');
       else if (ent.type === 'HATCH' && !ent.wipeout) self.startCommand('EDITSOMB');
       else if (ent.type === 'LWPOLYLINE') self.startCommand('EDITPOL');
       else if (ent.type === 'INSERT' && ent.attribs && ent.attribs.length) self.startCommand('EDITATR');
-      else self.ui.togglePalette('props', true);
+      else { self.pickedEntity = null; self.ui.togglePalette('props', true); }
       self.refresh();
     });
   };
@@ -565,6 +568,11 @@
 
   /* Resuelve el punto del cursor con refent, orto y polar */
   App.prototype.updateCursor = function (sp, ev) {
+    /* Mover el cursor deshace el recorrido del tabulador entre capturas */
+    if (this.snapTab && this.snapTabAt &&
+        (Math.abs(sp.x - this.snapTabAt.x) > 2 || Math.abs(sp.y - this.snapTabAt.y) > 2)) {
+      this.snapTab = 0; this.snapTabAt = null;
+    }
     this.cursorScreen = sp;
     var base = null;
     var p = this.pending;
@@ -845,8 +853,20 @@
       if (fn[e.key]) { e.preventDefault(); fn[e.key](); return; }
       if (inDialog) return;
 
+      /* Tabulador: recorre las capturas solapadas bajo la mira */
+      if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !inDialog &&
+          self.pending && self.pending.kind === 'point' && self.cursorScreen &&
+          self.snapCands && self.snapCands.length > 1) {
+        e.preventDefault();
+        self.snapTab = (self.snapTab || 0) + 1;
+        self.snapTabAt = { x: self.cursorScreen.x, y: self.cursorScreen.y };
+        self.updateCursor(self.cursorScreen);
+        self.refresh();
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
+        self.snapTab = 0; self.snapTabAt = null;
         if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
         if (self.gripDrag) { self.cancelGrip(); return; }
         self.ui.closeMenus();
