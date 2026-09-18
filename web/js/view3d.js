@@ -99,6 +99,25 @@
     this.target = G3.add(this.target, G3.add(G3.mul(right, -dx / w * hw), G3.mul(up, dy / h * hh)));
   };
   Cam.prototype.zoom = function (f) { this.dist = Math.max(1e-4, Math.min(1e9, this.dist * f)); };
+  /* Zoom hacia el cursor: el punto señalado se queda quieto en pantalla,
+     como en SolidWorks y CATIA.  Se corrige el objetivo con el
+     desplazamiento que el cambio de distancia introduce. */
+  Cam.prototype.zoomAt = function (f, sx, sy, w, h) {
+    var antes = this.ray(sx, sy, w, h);
+    var d0 = this.dist;
+    this.zoom(f);
+    if (!antes) return;
+    var despues = this.ray(sx, sy, w, h);
+    if (!despues) return;
+    /* punto de referencia: el plano perpendicular a la vista que pasa
+       por el objetivo, que es lo que el usuario percibe como "lo que hay
+       bajo el ratón" */
+    var pl = { n: G3.norm(this.dir), w: G3.dot(G3.norm(this.dir), this.target) };
+    var a = G3.rayPlane(antes.org, antes.dir, pl);
+    var b = G3.rayPlane(despues.org, despues.dir, pl);
+    if (!a || !b) { this.dist = d0 * f; return; }
+    this.target = G3.add(this.target, G3.sub(a.p, b.p));
+  };
   Cam.prototype.setView = function (name) {
     var v = V3.VIEWS[name];
     if (!v) return;
@@ -617,8 +636,8 @@
     var faces = [
       { i: [1, 3, 7, 5], n: v3(1, 0, 0), t: 'DER', view: 'DERECHA' },
       { i: [0, 4, 6, 2], n: v3(-1, 0, 0), t: 'IZQ', view: 'IZQUIERDA' },
-      { i: [2, 6, 7, 3], n: v3(0, 1, 0), t: 'POST', view: 'POSTERIOR' },
-      { i: [0, 1, 5, 4], n: v3(0, -1, 0), t: 'FRENTE', view: 'FRONTAL' },
+      { i: [2, 6, 7, 3], n: v3(0, 1, 0), t: 'POS', view: 'POSTERIOR' },
+      { i: [0, 1, 5, 4], n: v3(0, -1, 0), t: 'FRE', view: 'FRONTAL' },
       { i: [4, 5, 7, 6], n: v3(0, 0, 1), t: 'SUP', view: 'SUPERIOR' },
       { i: [0, 2, 3, 1], n: v3(0, 0, -1), t: 'INF', view: 'INFERIOR' }
     ];
@@ -626,6 +645,11 @@
     faces.forEach(function (f) {
       var vis = G3.dot(G3.applyDir(R, f.n), v3(0, 0, 1)) > 0.02;
       if (!vis) return;
+      /* Sólo las caras que miran al observador: antes se pintaban las
+         seis y los rótulos de las de atrás se encabalgaban con los de
+         delante ("SUP IZQ FRENTE" superpuestos). */
+      var nv = G3.applyDir(R, f.n);
+      if (nv.z <= 0.02) return;
       var pts = f.i.map(function (k) { return pr(V[k]); });
       ctx.beginPath();
       ctx.moveTo(pts[0].x, pts[0].y);
@@ -638,7 +662,7 @@
       var c = { x: 0, y: 0 };
       pts.forEach(function (p) { c.x += p.x / 4; c.y += p.y / 4; });
       ctx.fillStyle = '#10151d';
-      ctx.font = '600 ' + Math.round(size * 0.115) + 'px system-ui,sans-serif';
+      ctx.font = '600 ' + Math.max(9, Math.round(size * 0.105)) + 'px system-ui,sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(f.t, c.x, c.y);
       hits.push({ poly: pts, view: f.view });

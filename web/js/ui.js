@@ -714,7 +714,10 @@
 
   UI.prototype.setCoords = function (p) {
     var pr = Math.min(4, this.app.doc.vars.LUPREC);
-    this.el.coords.textContent = G.fmt(p.x, pr) + ', ' + G.fmt(p.y, pr) + ', ' + G.fmt(0, pr);
+    /* la cota Z se muestra de verdad: en 3D era siempre 0 y no había
+       forma de saber a qué altura estaba el punto capturado */
+    var z = (p && typeof p.z === 'number' && isFinite(p.z)) ? p.z : 0;
+    this.el.coords.textContent = G.fmt(p.x, pr) + ', ' + G.fmt(p.y, pr) + ', ' + G.fmt(z, pr);
   };
 
   UI.prototype.toggleCleanScreen = function () {
@@ -900,7 +903,10 @@
   UI.prototype.updateDyn = function () {
     var app = this.app, doc = app.doc;
     var d = this.el.dynin;
-    if (!doc.vars.DYNMODE || !app.cursorScreen || app.cleanScreenHideDyn) { d.hidden = true; return; }
+    /* En el espacio 3D la entrada dinámica plana no tiene sentido: el
+       punto se lee en la barra de estado con sus tres coordenadas y el
+       rótulo de la captura dice a qué se está enganchando. */
+    if (!doc.vars.DYNMODE || !app.cursorScreen || app.cleanScreenHideDyn || app.is3D) { d.hidden = true; return; }
     var p = app.pending;
     var wrapRect = document.getElementById('canvasWrap').getBoundingClientRect();
     d.hidden = false;
@@ -1433,6 +1439,19 @@
   UI.prototype.setStatus3D = function (on) {
     var el = document.getElementById('st3d');
     if (el) el.classList.toggle('on', !!on);
+    /* Al entrar en el espacio 3D la cinta pasa a las herramientas de
+       modelado, y al salir vuelve a la pestaña que estaba.  Es lo que
+       hace SolidWorks al cambiar de entorno. */
+    if (on) {
+      if (this.activeTab !== 'modelado') {
+        this.tab2d = this.activeTab;
+        this.activeTab = 'modelado';
+        this.buildRibbon();
+      }
+    } else if (this.activeTab === 'modelado') {
+      this.activeTab = this.tab2d || 'inicio';
+      this.buildRibbon();
+    }
   };
 
   UI.prototype.listDialog = function (title, items, current) {

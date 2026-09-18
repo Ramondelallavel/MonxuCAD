@@ -584,4 +584,18 @@
   Cmd.add(['LIMPIAPANTALLA', 'CLEANSCREENON', 'CLEANSCREEN'], { group: 'view', title: 'Pantalla limpia', transparent: true }, async function (ctx) {
     ctx.app.ui.toggleCleanScreen();
   });
+
+  /* Carga la planta de muestra que antes salía al arrancar */
+  Cmd.add(['EJEMPLO', 'SAMPLE', 'MUESTRA'], { group: 'file', icon: 'open', title: 'Dibujo de ejemplo' },
+  async function (ctx) {
+    if (ctx.doc.entities.length) {
+      var k = await ctx.getKeyword('Se perderá el dibujo actual. ¿Continuar?', ['Sí', 'No'], { def: 'No' });
+      if (!k || k.kw !== 'S') return;
+    }
+    ctx.app.sampleDrawing();
+    ctx.app.r.zoomBox(CAD.E.extentsAll(ctx.doc.entities, ctx.doc));
+    ctx.app.refresh(true);
+    ctx.out('Planta de vivienda de ejemplo cargada, con su presentación acotada.');
+  });
+
 })();

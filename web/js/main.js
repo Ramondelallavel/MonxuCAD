@@ -62,8 +62,10 @@
     }
     this.resize();
 
-    this.sampleDrawing();
-    this.r.zoomBox(E.extentsAll(this.doc.entities, this.doc));
+    /* Se arranca con el dibujo en blanco, como AutoCAD.  El ejemplo
+       sigue disponible con el comando EJEMPLO. */
+    this.r.view = { cx: 0, cy: 0, zoom: 1 };
+    this.r.zoomBox({ x1: -100, y1: -75, x2: 500, y2: 375 });
     this.banner();
     this.setPrompt('Comando: ');
     this.refresh();
@@ -72,7 +74,7 @@
 
   App.prototype.banner = function () {
     this.out('MonxuCAD  —  estación de dibujo y diseño 2D', 'ok');
-    this.out('Dibujo de ejemplo cargado con su presentación acotada. Escriba un comando o púlselo en la cinta.');
+    this.out('Dibujo nuevo. Escriba un comando o púlselo en la cinta.  EJEMPLO carga una planta de muestra.');
     this.out('Dibujo: LINEA POL CIRCULO ARCO RECTANG LINEAM SOMBREA CONTORNO   Modificar: RECORTA EMPALME DESFASE MATRIZ');
     this.out('Acotar: ACOTALINEAL ACOTARAPIDA   Papel: VENTANAS ESPACIOM ESCALAVP CAJETIN   Bloques: PALETABLOQUES');
     this.out('AYUDA lista los ' + Object.keys(CAD.Cmd.reg).length + ' comandos.  ABRE importa DXF.  EXPORTAR escribe DXF/PDF/SVG.');

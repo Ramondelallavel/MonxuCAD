@@ -157,10 +157,57 @@
     ctx.clearRect(0, 0, W, H);
     this.drawCamPaths3D(ctx, W, H);
     if (app.view3d.showCube)
-      app.cubeHits = V3.drawCube(ctx, app.view3d.cam, W - 118, 16, 96);
+      app.cubeHits = V3.drawCube(ctx, app.view3d.cam, W - 132, 16, 108);
     if (app.view3d.showUcs) V3.drawUcsIcon(ctx, app.view3d.cam, W, H);
+    if (CAD.Pick3D) {
+      CAD.Pick3D.drawHover(ctx, app);
+      CAD.Pick3D.drawSnap(ctx, app);
+      CAD.Pick3D.drawBox(ctx, app);
+    }
+    this.draw3dPreview(ctx);
     this.draw3dInfo(ctx);
     this.drawCross3D(ctx);
+  };
+
+  /* Previsualización del comando en curso, proyectada sobre la escena */
+  Renderer.prototype.draw3dPreview = function (ctx) {
+    var app = this.app;
+    var pv = app.preview, rb = app.rubber;
+    if ((!pv || !pv.length) && !rb) return;
+    var prj = CAD.Pick3D ? CAD.Pick3D.projector(app.view3d) : null;
+    if (!prj) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(160,210,255,0.95)';
+    ctx.lineWidth = 1.4;
+    ctx.setLineDash([6, 4]);
+    if (rb && rb.p1 && rb.p2) {
+      var a = prj({ x: rb.p1.x, y: rb.p1.y, z: rb.p1.z || 0 });
+      var b = prj({ x: rb.p2.x, y: rb.p2.y, z: rb.p2.z || 0 });
+      if (a && b) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    }
+    if (pv && pv.length) {
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      for (var i = 0; i < pv.length && i < 400; i++) {
+        var e = pv[i];
+        var segs = CAD.E.segs ? CAD.E.segs(e, app.doc) : null;
+        if (!segs) continue;
+        var z = e.elev || 0;
+        for (var j = 0; j < segs.length; j++) {
+          var pts = segs[j] && segs[j].pts ? segs[j].pts : segs[j];
+          if (!pts || pts.length < 2) continue;
+          var q0 = prj({ x: pts[0].x, y: pts[0].y, z: pts[0].z === undefined ? z : pts[0].z });
+          if (!q0) continue;
+          ctx.moveTo(q0.x, q0.y);
+          for (var k = 1; k < pts.length; k++) {
+            var q = prj({ x: pts[k].x, y: pts[k].y, z: pts[k].z === undefined ? z : pts[k].z });
+            if (q) ctx.lineTo(q.x, q.y);
+          }
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   };
 
   Renderer.prototype.draw3dInfo = function (ctx) {
@@ -273,71 +320,122 @@
   /* ---------- Navegación con el ratón ---------- */
   App.prototype.wire3D = function () {
     /* En 3D el lienzo 2D queda oculto, así que los eventos se recogen en
-       el propio lienzo WebGL (la superposición no los intercepta). */
+       el propio lienzo WebGL (la superposición no los intercepta).
+
+       Convenios de navegación, los mismos de SolidWorks y CATIA:
+         botón central          órbita
+         Mayús + central        encuadre
+         Ctrl + central         encuadre (alternativa de CATIA)
+         rueda                  zoom hacia el cursor
+         botón izquierdo        designar / precisar punto
+       Y, como en AutoCAD, con ORBITA activa el botón izquierdo orbita. */
     var self = this, cv = this.cv3d;
     function local(e) {
       var r = cv.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     }
     var drag = null;
+    var UMBRAL = 4;          /* píxeles para distinguir clic de arrastre */
+
+    /* Punto resuelto bajo el cursor: captura sobre la geometría o, si no
+       hay nada, el plano de trabajo. */
+    function resolver(sp) {
+      var h = CAD.Pick3D ? CAD.Pick3D.snap(self, sp.x, sp.y) : null;
+      self.snap3d = h;
+      if (h && h.p) {
+        self.cursorWorld = { x: h.p.x, y: h.p.y, z: h.p.z };
+        return self.cursorWorld;
+      }
+      var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
+      if (gp) self.cursorWorld = { x: gp.x, y: gp.y, z: gp.z };
+      return self.cursorWorld;
+    }
 
     cv.addEventListener('pointerdown', function (e) {
       if (!self.is3D) return;
       var sp = local(e);
+
       /* ViewCube */
       if (self.cubeHits) {
         var v = V3.cubeHit(self.cubeHits, sp.x, sp.y);
-        if (v) {
-          e.stopPropagation();
-          self.view3d.cam.setView(v);
-          self.refresh();
-          return;
-        }
+        if (v) { e.stopPropagation(); self.view3d.cam.setView(v); self.refresh(); return; }
       }
-      var orbit = self.orbitMode || e.shiftKey && e.button === 1 || e.button === 0 && self.orbitMode;
-      if (e.button === 1 || (e.button === 0 && self.orbitMode)) {
+
+      /* Navegación: central, o izquierdo con la órbita activa */
+      var navega = (e.button === 1) || (e.button === 0 && self.orbitMode);
+      if (navega) {
         e.preventDefault(); e.stopPropagation();
-        drag = { mode: e.shiftKey ? 'pan' : (e.button === 1 && !self.orbitMode ? 'pan' : 'orbit'), p: sp };
-        cv.setPointerCapture(e.pointerId);
+        var modo = (e.shiftKey || e.ctrlKey) ? 'pan' : 'orbit';
+        if (e.button === 1 && !e.shiftKey && !e.ctrlKey) modo = 'orbit';
+        drag = { mode: modo, p: sp, p0: sp };
+        try { cv.setPointerCapture(e.pointerId); } catch (err) { }
         return;
       }
-      if (e.button === 0 && !self.pending) {
-        /* designación por rayo */
+      if (e.button !== 0) return;
+
+      e.stopPropagation();
+      var p = self.pending;
+
+      /* Petición de punto: se toma la captura resuelta */
+      if (p && p.kind === 'point') {
+        var wp = resolver(sp);
+        if (wp) self.acceptPoint({ x: wp.x, y: wp.y, z: wp.z });
+        return;
+      }
+      /* Petición de un objeto concreto */
+      if (p && p.kind === 'entity') {
         var hit = self.view3d.pick(self, sp.x, sp.y);
-        if (hit && hit.ent) {
-          e.stopPropagation();
-          if (e.shiftKey) {
-            var k = self.selSet.indexOf(hit.ent);
-            if (k >= 0) self.selSet.splice(k, 1); else self.selSet.push(hit.ent);
-          } else self.selSet = [hit.ent];
-          self.v3dDirty();
-          self.refresh();
-          return;
-        }
-        if (!e.shiftKey) { self.selSet = []; self.v3dDirty(); self.refresh(); }
-        e.stopPropagation();
+        if (!hit || !hit.ent) { self.out('No se encontró ningún objeto.', 'warn'); self.setPrompt(p.text); return; }
+        if (p.opts.filter && !p.opts.filter(hit.ent)) { self.out('Objeto no válido.', 'warn'); self.setPrompt(p.text); return; }
+        self.resolve({ ent: hit.ent, p: hit.p || self.cursorWorld, shift: !!e.shiftKey });
         return;
       }
-      if (e.button === 0 && self.pending) {
-        /* punto sobre el plano de trabajo */
-        var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
-        if (gp) { e.stopPropagation(); self.acceptPoint({ x: gp.x, y: gp.y, z: gp.z }); }
-      }
+      /* Designación (o sin comando): clic sobre objeto, o ventana */
+      drag = { mode: 'box', p: sp, p0: sp, shift: e.shiftKey, select: true };
+      try { cv.setPointerCapture(e.pointerId); } catch (err) { }
     });
 
     cv.addEventListener('pointermove', function (e) {
       if (!self.is3D) return;
       var sp = local(e);
       self.cursorScreen = sp;
+
       if (!drag) {
-        var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
-        if (gp) {
-          self.cursorWorld = { x: gp.x, y: gp.y, z: gp.z };
-          self.ui.setCoords && self.ui.setCoords(gp);
+        /* el tabulador entre capturas se reinicia al mover el cursor */
+        if (self.snapTab && self.snapTabAt &&
+            (Math.abs(sp.x - self.snapTabAt.x) > 2 || Math.abs(sp.y - self.snapTabAt.y) > 2)) {
+          self.snapTab = 0; self.snapTabAt = null;
+        }
+        var p = self.pending;
+        if (p && p.kind === 'point') {
+          var wp = resolver(sp);
+          if (wp) {
+            self.ui.setCoords && self.ui.setCoords(wp);
+            if (p.opts.preview) { try { self.preview = p.opts.preview(wp) || []; } catch (err) { self.preview = []; } }
+            if (p.opts.rubber === 'line' && p.opts.base) self.rubber = { type: 'line', p1: p.opts.base, p2: wp };
+          }
+          self.hoverEnt = null;
+        } else {
+          self.snap3d = null;
+          var gp = self.view3d.groundPoint(sp.x, sp.y, self.doc.vars.ELEVATION || 0);
+          if (gp) { self.cursorWorld = { x: gp.x, y: gp.y, z: gp.z }; self.ui.setCoords && self.ui.setCoords(gp); }
+          /* realce del objeto bajo el cursor */
+          if (self.doc.vars.SELECTIONPREVIEW !== 0 && CAD.Pick3D)
+            self.hoverEnt = CAD.Pick3D.hover(self, sp.x, sp.y);
+        }
+        self.v3dOverlayDirty = true;
+        self.refresh();
+        return;
+      }
+
+      e.stopPropagation();
+      if (drag.mode === 'box') {
+        if (Math.abs(sp.x - drag.p0.x) > UMBRAL || Math.abs(sp.y - drag.p0.y) > UMBRAL) {
+          self.box3d = { a: drag.p0, b: sp };
+          self.refresh();
         }
         return;
       }
-      e.stopPropagation();
       var dx = sp.x - drag.p.x, dy = sp.y - drag.p.y;
       drag.p = sp;
       if (drag.mode === 'orbit') self.view3d.cam.orbit(dx * 0.0085, dy * 0.0085);
@@ -348,16 +446,60 @@
     cv.addEventListener('pointerup', function (e) {
       if (!self.is3D || !drag) return;
       e.stopPropagation();
-      drag = null;
+      var sp = local(e);
+      var d = drag; drag = null;
       try { cv.releasePointerCapture(e.pointerId); } catch (err) { }
+
+      if (d.mode !== 'box') return;
+      var movido = Math.abs(sp.x - d.p0.x) > UMBRAL || Math.abs(sp.y - d.p0.y) > UMBRAL;
+      self.box3d = null;
+
+      if (!movido) {
+        /* clic simple: designar el objeto bajo el cursor */
+        var hit = self.view3d.pick(self, sp.x, sp.y);
+        if (hit && hit.ent) {
+          if (self.pending && self.pending.kind === 'select') self.addToSelection([hit.ent]);
+          else if (d.shift) {
+            var k = self.selSet.indexOf(hit.ent);
+            if (k >= 0) self.selSet.splice(k, 1); else self.selSet.push(hit.ent);
+          } else self.selSet = [hit.ent];
+        } else if (self.pending && self.pending.kind === 'select') {
+          self.out('No se encontró ningún objeto.', 'warn');
+        } else if (!d.shift) self.selSet = [];
+      } else {
+        /* ventana (izquierda a derecha) o captura (derecha a izquierda) */
+        var crossing = sp.x < d.p0.x;
+        var ents = CAD.Pick3D ? CAD.Pick3D.boxSelect(self, d.p0, sp, crossing) : [];
+        if (self.pending && self.pending.kind === 'select') self.addToSelection(ents);
+        else if (d.shift) {
+          ents.forEach(function (x) { var k = self.selSet.indexOf(x); if (k >= 0) self.selSet.splice(k, 1); });
+        } else self.selSet = ents;
+      }
+      self.v3dDirty();
+      self.refresh();
     });
 
+    cv.addEventListener('pointercancel', function () { drag = null; self.box3d = null; self.refresh(); });
+
+    /* Zoom hacia el cursor, como en SolidWorks y en el 2D de la propia
+       aplicación: el punto señalado se queda quieto. */
     cv.addEventListener('wheel', function (e) {
       if (!self.is3D) return;
       e.preventDefault(); e.stopPropagation();
-      self.view3d.cam.zoom(e.deltaY < 0 ? 1 / 1.12 : 1.12);
+      var sp = local(e);
+      var f = e.deltaY < 0 ? 1 / 1.12 : 1.12;
+      var cam = self.view3d.cam;
+      if (cam.zoomAt) cam.zoomAt(f, sp.x, sp.y, self.view3d.W, self.view3d.H);
+      else cam.zoom(f);
       self.refresh();
     }, { passive: false });
+
+    /* El botón derecho termina el comando, como en 2D */
+    cv.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      if (self.orbitMode) { self.cancel(); return; }
+      if (self.rightAsEnter) self.rightAsEnter();
+    });
 
     cv.addEventListener('dblclick', function (e) {
       if (!self.is3D) return;
