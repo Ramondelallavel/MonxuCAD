@@ -255,20 +255,35 @@
     var sig = this.sceneSig();
     var v = this.view;
     var reuse = sc.valid && sc.sig === sig && sc.zoom === v.zoom && sc.pad === pad;
-    var dx = 0, dy = 0;
+    var k = 1, x0 = 0, y0 = 0;
     if (reuse) {
-      dx = (sc.cx - v.cx) * v.zoom;
-      dy = (v.cy - sc.cy) * v.zoom;
-      if (Math.abs(dx) > pad - 1 || Math.abs(dy) > pad - 1) reuse = false;
+      x0 = -pad + (sc.cx - v.cx) * v.zoom;
+      y0 = -pad + (v.cy - sc.cy) * v.zoom;
+      if (Math.abs(x0 + pad) > pad - 1 || Math.abs(y0 + pad) > pad - 1) reuse = false;
+    } else if (sc.valid && sc.sig === sig && sc.pad === pad && this.fastMode) {
+      /* Zoom en caliente: mientras dura el gesto se reaprovecha la escena
+         ya pintada, escalándola.  Antes cada paso de la rueda reconstruía
+         los miles de trazados y con un dibujo grande la rueda iba a
+         tirones; el fotograma nítido llega al soltar, que es cuando
+         navigating() invalida la caché. */
+      var kk = v.zoom / sc.zoom;
+      if (kk > 0.55 && kk < 1.9) {
+        var ex = this.W / 2 * (1 - kk) - kk * pad + (sc.cx - v.cx) * v.zoom;
+        var ey = this.H / 2 * (1 - kk) - kk * pad + (v.cy - sc.cy) * v.zoom;
+        /* sólo sirve si la imagen escalada sigue tapando toda la ventana */
+        if (ex <= 0 && ey <= 0 && ex + sc.wCss * kk >= this.W && ey + sc.hCss * kk >= this.H) {
+          reuse = true; k = kk; x0 = ex; y0 = ey;
+        }
+      }
     }
     if (!reuse) {
       var t0 = performance.now();
       this.buildScene(sc, pad, sig);
       this.lastSceneMs = performance.now() - t0;
-      dx = 0; dy = 0;
+      k = 1; x0 = -pad; y0 = -pad;
     }
     ctx.drawImage(sc.cv, 0, 0, sc.cv.width, sc.cv.height,
-      -pad + dx, -pad + dy, sc.wCss, sc.hCss);
+      x0, y0, sc.wCss * k, sc.hCss * k);
   };
 
   Renderer.prototype.buildScene = function (sc, pad, sig) {
