@@ -186,7 +186,7 @@
       n++;
       ctx.app.refresh();
     }
-    if (!n) ctx.doc.undoStack.pop();
+    if (!n) ctx.doc.discardTx();
   });
 
   Cmd.add(['COLOR', 'COL', 'DDCOLOR'], { group: 'props', title: 'Color' }, async function (ctx) {

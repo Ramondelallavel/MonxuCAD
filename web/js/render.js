@@ -75,6 +75,7 @@
   CAD.Renderer = Renderer;
 
   Renderer.prototype.resize = function () {
+    this.invalidateScene();
     var r = this.cv.getBoundingClientRect();
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
     this.W = Math.max(1, Math.round(r.width));
@@ -134,6 +135,13 @@
   /* ---------- Colores ---------- */
   Renderer.prototype.colorOf = function (ent, doc) {
     var c = E.effColor(ent, doc);
+    if (typeof c === 'number' && this._colMemo) {
+      var m = this._colMemo.get(c);
+      if (m !== undefined) return m;
+      var v = c === 7 ? (this.app.paperMode ? '#000000' : (this.app.lightTheme ? '#000000' : '#ffffff')) : G.aciCSS(c);
+      this._colMemo.set(c, v);
+      return v;
+    }
     if (c && typeof c === 'object' && c.rgb) return 'rgb(' + c.rgb.join(',') + ')';
     var i = c | 0;
     if (i === 7) return this.app.paperMode ? '#000000' : '#ffffff';
@@ -149,39 +157,48 @@
 
   Renderer.prototype.dashOf = function (ent, doc) {
     var name = E.effLtype(ent, doc);
+    if (name === 'CONTINUOUS' || name === 'Continuous') return null;
+    var memo = this._dashMemo;
+    var mk = name + '|' + (ent.ltscale || 1);
+    if (memo) { var hit = memo.get(mk); if (hit !== undefined) return hit; }
     var lt = doc.ltypes[name];
-    if (!lt || !lt.pat || !lt.pat.length) return null;
+    if (!lt || !lt.pat || !lt.pat.length) { if (memo) memo.set(mk, null); return null; }
     var s = (doc.vars.LTSCALE || 1) * (ent.ltscale || 1) * this.view.zoom;
     var out = lt.pat.map(function (v) { return Math.max(0.1, Math.abs(v) * s); });
     var total = out.reduce(function (a, b) { return a + b; }, 0);
-    if (total < 1.5) return null;            // demasiado pequeño: continuo
-    if (total > 4000) return null;           // demasiado grande: continuo
+    if (total < 1.5) { if (memo) memo.set(mk, null); return null; }   /* demasiado denso */
+    if (total > 4000) { if (memo) memo.set(mk, null); return null; }  /* demasiado largo */
+    if (memo) memo.set(mk, out);
     return out;
   };
 
   /* ============================================================
      Dibujo principal
      ============================================================ */
+  /* Rectángulo del dibujo que ocupa la ventana, con un margen */
+  Renderer.prototype.viewBox = function (pad) {
+    var a = this.s2w({ x: 0, y: this.H }), b = this.s2w({ x: this.W, y: 0 });
+    var m = (pad === undefined ? 24 : pad) / this.view.zoom;
+    return { x1: a.x - m, y1: a.y - m, x2: b.x + m, y2: b.y + m };
+  };
+
   Renderer.prototype.render = function () {
-    var ctx = this.ctx, app = this.app, doc = app.doc;
+    var ctx = this.ctx, app = this.app;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    ctx.fillStyle = app.paperMode ? '#5a5f66' : (this.app.lightTheme ? '#ffffff' : THEME.bg);
-    ctx.fillRect(0, 0, this.W, this.H);
     ctx.lineCap = 'butt';
     ctx.lineJoin = 'round';
 
-    if (app.paperMode) this.renderPaper();
-    else {
-      if (doc.vars.GRIDMODE) this.drawGrid();
-      this.drawEntities(doc.visible(), doc);
-    }
+    this.paintScene(ctx);
 
-    /* ---- superposiciones (siempre en la vista interactiva) ---- */
-    var self = this;
+    /* ---- superposiciones: se repintan siempre, son baratas ---- */
+    var self = this, doc = app.doc;
+    this._colMemo = this._colMemo || new Map();
+    this._dashMemo = this._dashMemo || new Map();
     if (app.selSet.length) {
       ctx.save();
-      app.selSet.forEach(function (e) { self.drawEntity(e, doc, { hl: true }); });
+      var lim = Math.min(app.selSet.length, 4000);
+      for (var i = 0; i < lim; i++) self.drawEntity(app.selSet[i], doc, { hl: true });
       ctx.restore();
       this.drawGrips();
     }
@@ -207,12 +224,220 @@
     this.needs = false;
   };
 
-  Renderer.prototype.drawEntities = function (list, doc) {
-    var self = this;
-    var hatches = [], others = [];
-    list.forEach(function (e) { (e.type === 'HATCH' ? hatches : others).push(e); });
-    hatches.forEach(function (e) { self.drawEntity(e, doc); });
-    others.forEach(function (e) { self.drawEntity(e, doc); });
+  /* ============================================================
+     Caché de escena
+     El fondo, la rejilla y los objetos se pintan en un lienzo
+     auxiliar más grande que la ventana. Mientras sólo se encuadre
+     dentro de ese margen, dibujar es un único volcado de imagen.
+     ============================================================ */
+  Renderer.prototype.sceneSig = function () {
+    var app = this.app, doc = app.doc, v = doc.vars;
+    return [doc.rev, doc.layerSig(), v.LWDISPLAY, v.GRIDMODE, v.GRIDUNIT, v.GRIDMAJOR,
+      v.LTSCALE, v.FILLMODE, v.PDMODE, v.PDSIZE, v.UCSANG, v.UCSORG.x, v.UCSORG.y,
+      app.paperMode ? 'P' : 'M', app.layoutIndex, app.activeVp ? 1 : 0,
+      app.lightTheme ? 1 : 0, THEME.bg, app.wipeoutFrames === false ? 0 : 1,
+      this.W, this.H, this.dpr, this.fastMode ? 1 : 0].join('|');
+  };
+
+  Renderer.prototype.paintScene = function (ctx) {
+    var sc = this.scene;
+    if (!sc) {
+      var cv = document.createElement('canvas');
+      sc = this.scene = { cv: cv, ctx: cv.getContext('2d', { alpha: false }), valid: false };
+    }
+    var pad = Math.round(Math.max(64, Math.min(260, Math.min(this.W, this.H) * 0.3)));
+    var sig = this.sceneSig();
+    var v = this.view;
+    var reuse = sc.valid && sc.sig === sig && sc.zoom === v.zoom && sc.pad === pad;
+    var dx = 0, dy = 0;
+    if (reuse) {
+      dx = (sc.cx - v.cx) * v.zoom;
+      dy = (v.cy - sc.cy) * v.zoom;
+      if (Math.abs(dx) > pad - 1 || Math.abs(dy) > pad - 1) reuse = false;
+    }
+    if (!reuse) {
+      var t0 = performance.now();
+      this.buildScene(sc, pad, sig);
+      this.lastSceneMs = performance.now() - t0;
+      dx = 0; dy = 0;
+    }
+    ctx.drawImage(sc.cv, 0, 0, sc.cv.width, sc.cv.height,
+      -pad + dx, -pad + dy, sc.wCss, sc.hCss);
+  };
+
+  Renderer.prototype.buildScene = function (sc, pad, sig) {
+    var wCss = this.W + pad * 2, hCss = this.H + pad * 2;
+    var pw = Math.round(wCss * this.dpr), ph = Math.round(hCss * this.dpr);
+    if (sc.cv.width !== pw || sc.cv.height !== ph) { sc.cv.width = pw; sc.cv.height = ph; }
+    var mainCtx = this.ctx, mainW = this.W, mainH = this.H;
+    this.ctx = sc.ctx;
+    this.W = wCss; this.H = hCss;
+    this._colMemo = new Map();
+    this._dashMemo = new Map();
+    this.stats = { dibujados: 0, lotes: 0, puntos: 0, omitidos: 0 };
+    sc.ctx.save();
+    sc.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    sc.ctx.lineCap = 'butt';
+    sc.ctx.lineJoin = 'round';
+    try {
+      this.drawWorld();
+    } finally {
+      sc.ctx.restore();
+      this.ctx = mainCtx;
+      this.W = mainW; this.H = mainH;
+    }
+    sc.valid = true; sc.sig = sig; sc.pad = pad;
+    sc.cx = this.view.cx; sc.cy = this.view.cy; sc.zoom = this.view.zoom;
+    sc.wCss = wCss; sc.hCss = hCss;
+  };
+
+  Renderer.prototype.invalidateScene = function () { if (this.scene) this.scene.valid = false; };
+
+  /* Fondo, rejilla y objetos, en el contexto activo */
+  Renderer.prototype.drawWorld = function () {
+    var ctx = this.ctx, app = this.app, doc = app.doc;
+    ctx.fillStyle = app.paperMode ? '#5a5f66' : (app.lightTheme ? '#ffffff' : THEME.bg);
+    ctx.fillRect(0, 0, this.W, this.H);
+    if (app.paperMode) { this.renderPaper(); return; }
+    if (doc.vars.GRIDMODE) this.drawGrid();
+    var wb = this.viewBox();
+    this.drawEntities(CAD.queryVisible(app, wb), doc, wb);
+  };
+
+  var BATCHABLE = { LINE: 1, LWPOLYLINE: 1, CIRCLE: 1, ARC: 1, ELLIPSE: 1, SPLINE: 1 };
+
+  Renderer.prototype.drawEntities = function (list, doc, wbox) {
+    var ctx = this.ctx, self = this;
+    if (!wbox) wbox = this.viewBox();
+    var zoom = this.view.zoom;
+    var minPx = this.fastMode ? 3.2 : 1.4;
+    var batches = new Map();
+    var dots = null;
+    var hatches = null;
+    var complex = null;
+    var n = list.length;
+
+    for (var i = 0; i < n; i++) {
+      var ent = list[i];
+      var t = ent.type;
+      if (t === 'HATCH') {
+        if (ent.wipeout) (complex || (complex = [])).push(ent);
+        else (hatches || (hatches = [])).push(ent);
+        continue;
+      }
+      if (!BATCHABLE[t]) { (complex || (complex = [])).push(ent); continue; }
+      var b = E.bboxOf(ent, doc);
+      if (b.x1 <= b.x2) {
+        if (b.x2 < wbox.x1 || b.x1 > wbox.x2 || b.y2 < wbox.y1 || b.y1 > wbox.y2) { self.stats.omitidos++; continue; }
+        var dpx = Math.max(b.x2 - b.x1, b.y2 - b.y1) * zoom;
+        if (dpx < minPx) {
+          (dots || (dots = [])).push(b.x1, b.y1, self.colorOf(ent, doc));
+          continue;
+        }
+      }
+      var col = self.colorOf(ent, doc);
+      var lw = self.lwPx(ent, doc);
+      var dash = self.dashOf(ent, doc);
+      var key = col + '|' + lw + '|' + (dash ? dash.join(',') : '');
+      var bt = batches.get(key);
+      if (!bt) { bt = { col: col, lw: lw, dash: dash, path: new Path2D() }; batches.set(key, bt); }
+      self.addToPath(bt.path, ent, doc);
+      self.stats.dibujados++;
+    }
+
+    /* sombreados primero: son rellenos */
+    if (hatches) for (var h = 0; h < hatches.length; h++) self.drawEntity(hatches[h], doc);
+    if (this.fastMode && complex && complex.length > 600) complex.length = 600;
+
+    /* un solo trazado por combinación de color, grosor y tipo de línea */
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'round';
+    batches.forEach(function (bt) {
+      ctx.strokeStyle = bt.col;
+      ctx.lineWidth = bt.lw;
+      ctx.setLineDash(bt.dash || EMPTY);
+      ctx.stroke(bt.path);
+      self.stats.lotes++;
+    });
+    ctx.restore();
+
+    /* objetos diminutos: una marca de un píxel */
+    if (dots) {
+      ctx.save();
+      for (var d = 0; d < dots.length; d += 3) {
+        ctx.fillStyle = dots[d + 2];
+        ctx.fillRect(Math.round(self.sx(dots[d])), Math.round(self.sy(dots[d + 1])), 1, 1);
+        self.stats.puntos++;
+      }
+      ctx.restore();
+    }
+
+    if (complex) for (var c = 0; c < complex.length; c++) self.drawEntity(complex[c], doc);
+  };
+
+  var EMPTY = [];
+
+  /* Añade la geometría de un objeto al trazado del lote */
+  Renderer.prototype.addToPath = function (path, ent, doc) {
+    var z = this.view.zoom;
+    switch (ent.type) {
+      case 'LINE': {
+        path.moveTo(this.sx(ent.p1.x), this.sy(ent.p1.y));
+        path.lineTo(this.sx(ent.p2.x), this.sy(ent.p2.y));
+        return;
+      }
+      case 'CIRCLE': {
+        var r = ent.r * z;
+        if (r < 0.4) return;
+        var cx = this.sx(ent.c.x), cy = this.sy(ent.c.y);
+        path.moveTo(cx + r, cy);
+        path.arc(cx, cy, r, 0, G.TAU);
+        return;
+      }
+      case 'ARC': {
+        var ra = ent.r * z;
+        if (ra < 0.4) return;
+        var ax = this.sx(ent.c.x), ay = this.sy(ent.c.y);
+        path.moveTo(ax + ra * Math.cos(-ent.a0), ay + ra * Math.sin(-ent.a0));
+        path.arc(ax, ay, ra, -ent.a1, -ent.a0);
+        return;
+      }
+      case 'ELLIPSE': {
+        var ma = G.len(ent.maj) * z;
+        if (ma < 0.4) return;
+        var ex = this.sx(ent.c.x), ey = this.sy(ent.c.y);
+        var rot = -Math.atan2(ent.maj.y, ent.maj.x);
+        var p0 = G.ellPt(ent.c, ent.maj.x, ent.maj.y, ent.ratio, ent.t0);
+        path.moveTo(this.sx(p0.x), this.sy(p0.y));
+        path.ellipse(ex, ey, ma, ma * ent.ratio, rot, -ent.t1, -ent.t0, true);
+        return;
+      }
+      default: {
+        var segs = E.dispOf(ent, doc, this.quality());
+        for (var i = 0; i < segs.length; i++) this.addPts(path, segs[i].pts, segs[i].closed);
+        return;
+      }
+    }
+  };
+
+  /* Vuelca puntos descartando los que caen a menos de medio píxel.
+     El cierre se hace con una línea explícita y nunca con closePath():
+     sobre un trazado que va creciendo, closePath() es cuadrático y
+     hunde el rendimiento al agrupar miles de objetos en un lote. */
+  Renderer.prototype.addPts = function (path, pts, closed) {
+    var n = pts.length;
+    if (n < 2) return;
+    var px = this.sx(pts[0].x), py = this.sy(pts[0].y);
+    path.moveTo(px, py);
+    var lx = px, ly = py;
+    for (var i = 1; i < n; i++) {
+      var x = this.sx(pts[i].x), y = this.sy(pts[i].y);
+      if (i < n - 1 && Math.abs(x - lx) < 0.6 && Math.abs(y - ly) < 0.6) continue;
+      path.lineTo(x, y);
+      lx = x; ly = y;
+    }
+    if (closed) path.lineTo(px, py);
   };
 
   /* Entidades del espacio modelo visibles, con independencia del espacio activo */
@@ -274,7 +499,9 @@
       self.view = self.vpView(vp2, pv);
       var savedPaper = self.app.paperMode;
       self.app.paperMode = true;      /* fuerza tinta oscura sobre papel */
-      self.drawEntities(self.modelVisible(doc, vp2), doc);
+      var mv = self.modelVisible(doc, vp2);
+      var vb = self.viewBox();
+      self.drawEntities(CAD.queryModel(doc, mv, vb), doc, vb);
       self.app.paperMode = savedPaper;
       self.view = keep;
       ctx.restore();
@@ -414,7 +641,7 @@
   Renderer.prototype.drawEntity = function (ent, doc, o) {
     o = o || {};
     var ctx = this.ctx;
-    var b = ent.type === 'XLINE' || ent.type === 'RAY' ? null : E.extents(ent, doc);
+    var b = ent.type === 'XLINE' || ent.type === 'RAY' ? null : E.bboxOf(ent, doc);
     if (b && G.bboxValid(b)) {
       var s1 = this.w2s({ x: b.x1, y: b.y2 }), s2 = this.w2s({ x: b.x2, y: b.y1 });
       if (s2.x < -60 || s1.x > this.W + 60 || s2.y < -60 || s1.y > this.H + 60) return;
@@ -456,7 +683,8 @@
         break;
       }
       case 'LWPOLYLINE': {
-        var pts = E.plinePts(ent, this.quality());
+        var dsp = E.dispOf(ent, doc, this.quality());
+        var pts = dsp[0] ? dsp[0].pts : [];
         if (ent.width > 0 && doc.vars.FILLMODE) {
           this.drawWidePline(ctx, pts, ent.closed, ent.width * this.view.zoom, col);
         } else { this.pathPts(ctx, pts, ent.closed); ctx.stroke(); }

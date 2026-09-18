@@ -49,7 +49,7 @@
       prev = p;
       ctx.app.refresh();
     }
-    if (!created.length) ctx.doc.undoStack.pop();
+    if (!created.length) ctx.doc.discardTx();
   });
 
   /* ============================================================
@@ -131,7 +131,7 @@
       ent.verts = verts;
       ctx.app.refresh();
     }
-    if (verts.length < 2) { ctx.doc.remove(ent); ctx.doc.undoStack.pop(); }
+    if (verts.length < 2) { ctx.doc.remove(ent); ctx.doc.discardTx(); }
   });
 
   /* bulge tangente a la dirección del segmento anterior */
@@ -564,7 +564,7 @@
       ctx.app.refresh();
     }
     if (pts.length >= 2) CU.add(ctx, E.spline(pts, false));
-    else ctx.doc.undoStack.pop();
+    else ctx.doc.discardTx();
   });
 
   /* ============================================================
@@ -580,7 +580,7 @@
       ctx.doc.add(E.point(p)); any = true;
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
 
   /* ============================================================
@@ -603,7 +603,7 @@
       ctx.doc.add(donutAt(c, di, de)); any = true;
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
   function donutAt(c, di, de) {
     var r = (di + de) / 4, w = (de - di) / 2;
@@ -703,7 +703,7 @@
       doc.add(te); any = true; line++;
       ctx.app.refresh();
     }
-    if (!any) doc.undoStack.pop();
+    if (!any) doc.discardTx();
   });
 
   /* ============================================================

@@ -133,7 +133,22 @@
     this.doc = app.doc;
     this.def = def;
     this.name = def ? def.name : '';
+    this._seen = [];
   }
+
+  /* Todo objeto que el motor entrega al comando queda anotado: si ya hay
+     transacción abierta se guarda su estado, y si no, se guardará al abrirla. */
+  Ctx.prototype._see = function (list) {
+    if (!list) return list;
+    var arr = Array.isArray(list) ? list : [list];
+    if (this.doc._tx) this.doc.touchAll(arr);
+    else {
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] && this._seen.indexOf(arr[i]) < 0) this._seen.push(arr[i]);
+      }
+    }
+    return list;
+  };
   CAD.Ctx = Ctx;
 
   Ctx.prototype.out = function (s, cls) { this.app.out(s, cls); };
@@ -186,16 +201,21 @@
   Ctx.prototype.getSelection = function (msg, opts) {
     opts = opts || {};
     var app = this.app;
+    var self = this;
     if (!opts.force && app.selSet.length) {
       var s = app.selSet.slice();
       this.out(s.length + ' encontrado(s)');
-      return Promise.resolve(s);
+      return Promise.resolve(this._see(s));
     }
-    return this._ask('select', msg || 'Designe objetos', opts);
+    return this._ask('select', msg || 'Designe objetos', opts).then(function (r) { return self._see(r); });
   };
   /* --- Un solo objeto --- */
   Ctx.prototype.getEntity = function (msg, opts) {
-    return this._ask('entity', msg, opts || {});
+    var self = this;
+    return this._ask('entity', msg, opts || {}).then(function (r) {
+      if (r && r.ent) self._see([r.ent]);
+      return r;
+    });
   };
 
   Ctx.prototype.setPreview = function (arr) { this.app.preview = arr || []; this.app.refresh(); };
@@ -278,6 +298,7 @@
   Engine.finishCommand = function (seq) {
     /* si entretanto se inició otro comando, no se toca su estado */
     if (seq !== undefined && seq !== this.cmdSeq) return;
+    if (this.doc && this.doc.commitTx) this.doc.commitTx();
     this.pending = null;
     this.activeCmd = null;
     this.activeCtx = null;
@@ -566,7 +587,12 @@
   Engine.selectBox = function (p1, p2, crossing) {
     var doc = this.doc;
     var box = { x1: Math.min(p1.x, p2.x), y1: Math.min(p1.y, p2.y), x2: Math.max(p1.x, p2.x), y2: Math.max(p1.y, p2.y) };
-    var hit = doc.selectable().filter(function (e) { return E.hitBox(e, box, crossing, doc); });
+    var cand = CAD.queryVisible(this, box);
+    var hit = cand.filter(function (e) {
+      var l = doc.layers[e.layer];
+      if (l && l.locked) return false;
+      return E.hitBox(e, box, crossing, doc);
+    });
     var p = this.pending;
     if (p && p.kind === 'select' && p.removeMode) {
       var r = this.removeFromSelection(hit);
@@ -578,21 +604,39 @@
     return hit;
   };
 
-  Engine.pickAt = function (sp) {
+  /* Candidatos bajo el cursor, ya filtrados por el índice espacial */
+  Engine.nearCursor = function (sp, tol) {
     var doc = this.doc, r = this.r;
     var wp = r.s2w(sp);
-    var tol = (doc.vars.PICKBOX || 4) / r.view.zoom;
-    var list = doc.selectable();
-    for (var i = list.length - 1; i >= 0; i--) {
-      if (E.hit(list[i], wp, tol, doc)) return list[i];
+    var box = { x1: wp.x - tol, y1: wp.y - tol, x2: wp.x + tol, y2: wp.y + tol };
+    var list = CAD.queryVisible(this, box);
+    var lock = doc.layers;
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i];
+      var l = lock[e.layer];
+      if (l && l.locked) continue;
+      var b = E.bboxOf(e, doc);
+      if (b.x1 <= b.x2 && (b.x2 < box.x1 || b.x1 > box.x2 || b.y2 < box.y1 || b.y1 > box.y2)) continue;
+      out.push(e);
+    }
+    return { list: out, wp: wp };
+  };
+
+  Engine.pickAt = function (sp) {
+    var doc = this.doc;
+    var tol = (doc.vars.PICKBOX || 4) / this.r.view.zoom;
+    var q = this.nearCursor(sp, tol);
+    for (var i = q.list.length - 1; i >= 0; i--) {
+      if (E.hit(q.list[i], q.wp, tol, doc)) return q.list[i];
     }
     return null;
   };
 
   Engine.pickAllAt = function (sp) {
-    var doc = this.doc, r = this.r;
-    var wp = r.s2w(sp);
-    var tol = (doc.vars.PICKBOX || 4) / r.view.zoom;
-    return doc.selectable().filter(function (e) { return E.hit(e, wp, tol, doc); });
+    var doc = this.doc;
+    var tol = (doc.vars.PICKBOX || 4) / this.r.view.zoom;
+    var q = this.nearCursor(sp, tol);
+    return q.list.filter(function (e) { return E.hit(e, q.wp, tol, doc); });
   };
 })();

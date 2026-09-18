@@ -121,7 +121,7 @@
       ctx.out('Contorno creado: ' + made + ' polilínea(s).');
       ctx.app.refresh();
     }
-    if (!made) ctx.doc.undoStack.pop();
+    if (!made) ctx.doc.discardTx();
   });
 
   /* ============================================================

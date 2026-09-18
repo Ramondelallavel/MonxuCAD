@@ -155,14 +155,15 @@
     if (!Object.keys(active).length) return null;
 
     var box = { x1: wp.x - tolW, y1: wp.y - tolW, x2: wp.x + tolW, y2: wp.y + tolW };
+    var cand = CAD.queryVisible(app, box);
     var near = [];
-    doc.visible().forEach(function (e) {
-      if (e.type === 'HATCH') return;
-      var b = E.extents(e, doc);
-      if (!G.bboxValid(b)) { near.push(e); return; }
-      if (G.bboxHit(G.bboxGrow(b, tolW), box)) near.push(e);
-    });
-    if (near.length > 400) near = near.slice(0, 400);
+    for (var ci = 0; ci < cand.length && near.length < 220; ci++) {
+      var ce = cand[ci];
+      if (ce.type === 'HATCH') continue;
+      var cb = E.bboxOf(ce, doc);
+      if (!G.bboxValid(cb)) { near.push(ce); continue; }
+      if (G.bboxHit(G.bboxGrow(cb, tolW), box)) near.push(ce);
+    }
 
     var cands = [];
     /* puntos notables */

@@ -224,7 +224,7 @@
       count++;
       ctx.app.refresh();
     }
-    if (!count) ctx.doc.undoStack.pop();
+    if (!count) ctx.doc.discardTx();
   });
 
   function ghost(ctx, sel, m) {
@@ -355,7 +355,7 @@
       }
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
 
   function offsetEntity(ctx, ent, d, side, through) {
@@ -491,7 +491,7 @@
       else ctx.err(extendMode ? 'El objeto no intersecta ninguna arista.' : 'El objeto no intersecta ninguna arista de corte.');
       ctx.app.refresh();
     }
-    if (!any) doc.undoStack.pop();
+    if (!any) doc.discardTx();
   }
 
   function doTrim(ctx, ent, pick, bp) {
@@ -663,7 +663,7 @@
       var e2 = await ctx.getEntity('Designe el segundo objeto o mantenga pulsada Mayús para aplicar una esquina');
       if (!e2) return;
       ctx.doc.mark('EMPALME');
-      if (!doFillet(ctx, e1, e2, r)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.undoStack.pop(); }
+      if (!doFillet(ctx, e1, e2, r)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.discardTx(); }
       ctx.app.refresh();
       return;
     }
@@ -808,7 +808,7 @@
       ctx.doc.mark('CHAFLAN');
       var A = e1.ent, B = e2.ent;
       var ints = G.interLine(A.p1, A.p2, B.p1, B.p2, true, true);
-      if (!ints.length) { ctx.err('Las líneas son paralelas.'); ctx.doc.undoStack.pop(); return; }
+      if (!ints.length) { ctx.err('Las líneas son paralelas.'); ctx.doc.discardTx(); return; }
       var corner = ints[0];
       var dirA = G.ang(corner, G.dist(A.p1, corner) > G.dist(A.p2, corner) ? A.p1 : A.p2);
       var dirB = G.ang(corner, G.dist(B.p1, corner) > G.dist(B.p2, corner) ? B.p1 : B.p2);
@@ -935,7 +935,7 @@
       } else ctx.err('Objeto no válido.');
       ctx.app.refresh();
     }
-    if (!any) ctx.doc.undoStack.pop();
+    if (!any) ctx.doc.discardTx();
   });
 
   /* ============================================================
@@ -973,7 +973,7 @@
         break;
       }
     }
-    if (joined < 2) { ctx.err('No hay objetos contiguos que unir.'); ctx.doc.undoStack.pop(); return; }
+    if (joined < 2) { ctx.err('No hay objetos contiguos que unir.'); ctx.doc.discardTx(); return; }
     var closed = G.dist(merged.verts[0], merged.verts[merged.verts.length - 1]) < tol;
     if (closed) merged.verts.pop();
     var src = merged.ent;
@@ -1006,7 +1006,7 @@
       parts.forEach(function (p) { ctx.doc.add(p); });
       n++;
     });
-    if (!n) { ctx.err('No se puede descomponer estos objetos.'); ctx.doc.undoStack.pop(); }
+    if (!n) { ctx.err('No se puede descomponer estos objetos.'); ctx.doc.discardTx(); }
     ctx.app.selSet = [];
     ctx.app.refresh();
   });

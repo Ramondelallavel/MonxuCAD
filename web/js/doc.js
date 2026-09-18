@@ -38,6 +38,8 @@
     this.undoStack = [];
     this.redoStack = [];
     this.dirty = false;
+    this.rev = 0;            /* cambia con cada alta o baja: invalida índices */
+    this._tx = null;         /* transacción de deshacer en curso */
     this.vars = {
       CLAYER: '0', CECOLOR: 256, CELTYPE: 'ByLayer', CELWEIGHT: -1, CETRANSPARENCY: 0,
       LTSCALE: 1, CELTSCALE: 1, TEXTSIZE: 2.5, TEXTSTYLE: 'Standard',
@@ -138,8 +140,11 @@
     if (ent.ltype === undefined) ent.ltype = this.vars.CELTYPE;
     if (ent.lw === undefined) ent.lw = this.vars.CELWEIGHT;
     if (ent.ltscale === undefined) ent.ltscale = this.vars.CELTSCALE;
-    this.ents().push(ent);
+    var arr = this.ents();
+    arr.push(ent);
+    if (this._tx) this._tx.ops.push({ k: 'a', arr: arr, e: ent, i: arr.length - 1 });
     this.dirty = true;
+    this.rev++;
     return ent;
   };
   Doc.prototype.addAll = function (arr) { var s = this; arr.forEach(function (e) { s.add(e); }); return arr; };
@@ -148,8 +153,29 @@
     this.layouts.forEach(function (l) { lists.push(l.entities); });
     for (var k = 0; k < lists.length; k++) {
       var i = lists[k].indexOf(ent);
-      if (i >= 0) { lists[k].splice(i, 1); this.dirty = true; return; }
+      if (i >= 0) {
+        lists[k].splice(i, 1);
+        if (this._tx) this._tx.ops.push({ k: 'r', arr: lists[k], e: ent, i: i });
+        this.dirty = true;
+        this.rev++;
+        return;
+      }
     }
+  };
+
+  /* Declara que un objeto va a modificarse en el sitio.
+     Guarda su estado anterior una sola vez por transacción. */
+  Doc.prototype.touch = function (ent) {
+    if (ent && E.invalidate) E.invalidate(ent);
+    if (!this._tx || !ent) return ent;
+    if (!this._tx.mods.has(ent)) this._tx.mods.set(ent, deep(ent));
+    this.dirty = true;
+    return ent;
+  };
+  Doc.prototype.touchAll = function (list) {
+    if (!list) return list;
+    for (var i = 0; i < list.length; i++) this.touch(list[i]);
+    return list;
   };
   Doc.prototype.removeAll = function (arr) { var s = this; arr.slice().forEach(function (e) { s.remove(e); }); };
   Doc.prototype.byId = function (id) {
@@ -160,19 +186,93 @@
   };
 
   /* Entidades visibles (capa encendida y no congelada) */
-  Doc.prototype.visible = function () {
-    var self = this;
-    return this.ents().filter(function (e) {
-      var l = self.layer(e.layer);
-      return l.on && !l.frozen && !e.hidden;
-    });
-  };
-  Doc.prototype.selectable = function () {
-    var self = this;
-    return this.visible().filter(function (e) { return !self.layer(e.layer).locked; });
+  /* Firma del estado de capas: cambia al encender, congelar o bloquear */
+  Doc.prototype.layerSig = function () {
+    var s = '', o = this.layerOrder, L = this.layers;
+    for (var i = 0; i < o.length; i++) {
+      var l = L[o[i]];
+      if (!l) continue;
+      s += (l.on ? 1 : 0) + (l.frozen ? 2 : 0) + (l.locked ? 4 : 0) + ',';
+    }
+    return s;
   };
 
-  /* ---------- Deshacer / Rehacer ---------- */
+  /* La lista de visibles se reutiliza mientras nada cambie: los índices
+     espaciales dependen de que su identidad se mantenga. */
+  Doc.prototype.visible = function () {
+    var arr = this.ents();
+    var sig = this.rev + '|' + this.layerSig();
+    if (this._visCache && this._visSig === sig && this._visSrc === arr) return this._visCache;
+    var out = [], L = this.layers, def = L['0'];
+    for (var i = 0; i < arr.length; i++) {
+      var e = arr[i];
+      if (e.hidden) continue;
+      var l = L[e.layer] || def;
+      if (!l.on || l.frozen) continue;
+      out.push(e);
+    }
+    this._visCache = out;
+    this._visSig = sig;
+    this._visSrc = arr;
+    return out;
+  };
+
+  Doc.prototype.selectable = function () {
+    var arr = this.visible();
+    var sig = this.rev + '|' + this.layerSig();
+    if (this._selCache && this._selSig === sig && this._selSrc === arr) return this._selCache;
+    var out = [], L = this.layers;
+    for (var i = 0; i < arr.length; i++) {
+      var l = L[arr[i].layer];
+      if (l && l.locked) continue;
+      out.push(arr[i]);
+    }
+    this._selCache = out;
+    this._selSig = sig;
+    this._selSrc = arr;
+    return out;
+  };
+
+  /* ---------- Deshacer / Rehacer por registro de cambios ----------
+     Sólo se clona lo que cambia: las tablas del dibujo (pequeñas) y
+     los objetos que se tocan. Un documento de cien mil entidades ya
+     no se copia entero en cada comando. */
+  Doc.prototype.metaSnapshot = function () {
+    return {
+      layers: deep(this.layers),
+      layerOrder: this.layerOrder.slice(),
+      blocks: deep(this.blocks),
+      ltypes: deep(this.ltypes),
+      textStyles: deep(this.textStyles),
+      dimStyles: deep(this.dimStyles),
+      groups: deep(this.groups),
+      vars: deep(this.vars),
+      nextId: this.nextId,
+      layouts: this.layouts.map(function (l) {
+        return { name: l.name, w: l.w, h: l.h, margin: l.margin, viewports: deep(l.viewports) };
+      })
+    };
+  };
+  Doc.prototype.metaRestore = function (m) {
+    if (!m) return;
+    this.layers = deep(m.layers);
+    this.layerOrder = m.layerOrder.slice();
+    this.blocks = deep(m.blocks);
+    this.ltypes = deep(m.ltypes);
+    this.textStyles = deep(m.textStyles);
+    this.dimStyles = deep(m.dimStyles);
+    this.groups = deep(m.groups);
+    this.vars = deep(m.vars);
+    this.nextId = m.nextId;
+    var self = this;
+    m.layouts.forEach(function (l, i) {
+      var t = self.layouts[i];
+      if (!t) return;
+      t.name = l.name; t.w = l.w; t.h = l.h; t.margin = l.margin;
+      t.viewports = deep(l.viewports);
+    });
+  };
+
   Doc.prototype.snapshot = function () {
     return {
       entities: deep(this.entities),
@@ -207,23 +307,98 @@
     if (s.groups) this.groups = deep(s.groups);
   };
   Doc.prototype.mark = function (label) {
-    this.undoStack.push({ label: label || '', state: this.snapshot() });
-    if (this.undoStack.length > 80) this.undoStack.shift();
+    this.commitTx();
+    this._tx = { label: label || '', ops: [], mods: new Map(), meta: this.metaSnapshot() };
     this.redoStack.length = 0;
+    /* captura automática: lo que el comando ya tiene designado o ha
+       señalado hasta ahora es lo que puede modificar en el sitio */
+    var app = CAD.APP;
+    if (app) {
+      if (app.selSet && app.selSet.length) this.touchAll(app.selSet);
+      if (app.activeCtx && app.activeCtx._seen && app.activeCtx._seen.length) this.touchAll(app.activeCtx._seen);
+    }
+    return this._tx;
   };
+
+  /* Abandona la transacción en curso sin registrarla (el comando no hizo nada) */
+  Doc.prototype.discardTx = function () { this._tx = null; };
+
+  Doc.prototype.commitTx = function () {
+    var tx = this._tx;
+    this._tx = null;
+    if (!tx) return null;
+    if (!tx.ops.length && !tx.mods.size && !metaDiffers(tx.meta, this)) return null;
+    this.undoStack.push(tx);
+    if (this.undoStack.length > 120) this.undoStack.shift();
+    return tx;
+  };
+
+  function metaDiffers(m, doc) {
+    if (!m) return false;
+    if (m.nextId !== doc.nextId) return true;
+    if (m.layerOrder.length !== doc.layerOrder.length) return true;
+    var a = JSON.stringify(m.vars), b = JSON.stringify(doc.vars);
+    if (a !== b) return true;
+    if (Object.keys(m.blocks).length !== Object.keys(doc.blocks).length) return true;
+    if (Object.keys(m.layers).length !== Object.keys(doc.layers).length) return true;
+    if (JSON.stringify(m.layers) !== JSON.stringify(doc.layers)) return true;
+    if (JSON.stringify(m.groups) !== JSON.stringify(doc.groups)) return true;
+    if (JSON.stringify(m.dimStyles) !== JSON.stringify(doc.dimStyles)) return true;
+    if (JSON.stringify(m.textStyles) !== JSON.stringify(doc.textStyles)) return true;
+    for (var i = 0; i < m.layouts.length; i++) {
+      var t = doc.layouts[i];
+      if (!t) return true;
+      if (m.layouts[i].name !== t.name || m.layouts[i].w !== t.w || m.layouts[i].h !== t.h) return true;
+      if (JSON.stringify(m.layouts[i].viewports) !== JSON.stringify(t.viewports)) return true;
+    }
+    return false;
+  }
+
+  /* Invierte una transacción y devuelve la inversa (para rehacer) */
+  Doc.prototype.applyInverse = function (tx) {
+    var inv = { label: tx.label, ops: [], mods: new Map(), meta: this.metaSnapshot() };
+    /* objetos modificados: se guarda el estado actual y se restaura el anterior */
+    tx.mods.forEach(function (before, ent) {
+      inv.mods.set(ent, deep(ent));
+      Object.keys(ent).forEach(function (k) { if (!(k in before)) delete ent[k]; });
+      Object.keys(before).forEach(function (k) { ent[k] = before[k]; });
+      if (E.invalidate) E.invalidate(ent);
+    });
+    /* operaciones estructurales, en orden inverso */
+    for (var i = tx.ops.length - 1; i >= 0; i--) {
+      var op = tx.ops[i];
+      if (op.k === 'a') {
+        var j = op.arr.indexOf(op.e);
+        if (j >= 0) op.arr.splice(j, 1);
+        inv.ops.push({ k: 'r', arr: op.arr, e: op.e, i: op.i });
+      } else {
+        op.arr.splice(Math.min(op.i, op.arr.length), 0, op.e);
+        inv.ops.push({ k: 'a', arr: op.arr, e: op.e, i: op.i });
+      }
+    }
+    this.metaRestore(tx.meta);
+    this.rev++;
+    this.dirty = true;
+    if (E.invalidateAll) E.invalidateAll();
+    return inv;
+  };
+
   Doc.prototype.undo = function () {
+    this.commitTx();
     if (!this.undoStack.length) return null;
-    var it = this.undoStack.pop();
-    this.redoStack.push({ label: it.label, state: this.snapshot() });
-    this.restore(it.state);
-    return it.label;
+    var tx = this.undoStack.pop();
+    var inv = this.applyInverse(tx);
+    this.redoStack.push(inv);
+    return tx.label;
   };
+
   Doc.prototype.redo = function () {
+    this.commitTx();
     if (!this.redoStack.length) return null;
-    var it = this.redoStack.pop();
-    this.undoStack.push({ label: it.label, state: this.snapshot() });
-    this.restore(it.state);
-    return it.label;
+    var tx = this.redoStack.pop();
+    var inv = this.applyInverse(tx);
+    this.undoStack.push(inv);
+    return tx.label;
   };
 
   /* ============================================================
@@ -447,7 +622,8 @@
 
   E.extentsAll = function (list, doc) {
     var b = G.bboxNew();
-    list.forEach(function (e) { G.bboxMerge(b, E.extents(e, doc)); });
+    var f = E.bboxOf || E.extents;
+    for (var i = 0; i < list.length; i++) G.bboxMerge(b, f(list[i], doc));
     return b;
   };
 
@@ -493,6 +669,7 @@
      Transformaciones
      ============================================================ */
   E.transform = function (ent, m, doc) {
+    if (doc && doc.touch) doc.touch(ent); else if (E.invalidate) E.invalidate(ent);
     var sf = G.mScaleFactor(m), rot = G.mRotation(m), mir = G.mIsMirror(m);
     switch (ent.type) {
       case 'LINE': ent.p1 = G.mApply(m, ent.p1); ent.p2 = G.mApply(m, ent.p2); break;
@@ -687,6 +864,7 @@
 
   /* Mover un pinzamiento concreto */
   E.moveGrip = function (ent, key, np, doc) {
+    if (doc && doc.touch) doc.touch(ent); else if (E.invalidate) E.invalidate(ent);
     switch (ent.type) {
       case 'LINE':
         if (key === 'p1') ent.p1 = G.clone(np);

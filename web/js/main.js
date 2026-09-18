@@ -90,14 +90,39 @@
     this.refresh();
   };
 
-  App.prototype.refresh = function () {
+  /* Durante el encuadre o el zoom se baja el detalle si la escena es
+     cara de construir, y se repinta completa al detenerse. */
+  App.prototype.navigating = function () {
     var self = this;
+    if ((this.r.lastSceneMs || 0) > 28) this.r.fastMode = true;
+    clearTimeout(this._navT);
+    this._navT = setTimeout(function () {
+      if (!self.r.fastMode) return;
+      self.r.fastMode = false;
+      self.r.invalidateScene();
+      self.refresh();
+    }, 170);
+  };
+
+  App.prototype.refresh = function (hard) {
+    var self = this;
+    if (hard) {
+      if (CAD.Cache) CAD.Cache.clear();
+      if (CAD.dropIndex) CAD.dropIndex();
+      this.r.invalidateScene();
+    }
     if (this._raf) return;
     this._raf = requestAnimationFrame(function () {
       self._raf = 0;
       self.r.render();
-      self.ui.syncPropBar();
-      self.ui.renderProps();
+      /* la interfaz sólo se rehace cuando cambia algo que muestra */
+      var sig = self.doc.rev + '|' + self.selSet.length + '|' + (self.selSet[0] ? self.selSet[0].id : 0) +
+        '|' + self.doc.vars.CLAYER + '|' + self.doc.vars.CECOLOR + '|' + self.doc.vars.CELTYPE + '|' + self.doc.vars.CELWEIGHT;
+      if (sig !== self._uiSig) {
+        self._uiSig = sig;
+        self.ui.syncPropBar();
+        self.ui.renderProps();
+      }
     });
   };
 
@@ -238,6 +263,7 @@
     cv.addEventListener('pointermove', function (e) {
       var sp = local(e);
       if (drag && drag.mode === 'pan') {
+        self.navigating();
         self.r.panBy(sp.x - drag.last.x, sp.y - drag.last.y);
         drag.last = sp;
         self.cursorScreen = sp;
@@ -245,6 +271,7 @@
         return;
       }
       if (drag && drag.mode === 'rtzoom') {
+        self.navigating();
         var dy = drag.last.y - sp.y;
         self.r.zoomBy(Math.exp(dy * 0.006), { x: self.r.W / 2, y: self.r.H / 2 });
         drag.last = sp;
@@ -324,6 +351,7 @@
 
     cv.addEventListener('wheel', function (e) {
       e.preventDefault();
+      self.navigating();
       var sp = local(e);
       self.r.zoomBy(e.deltaY < 0 ? 1.15 : 1 / 1.15, sp);
       self.updateCursor(sp, e);
@@ -782,7 +810,13 @@
       return;
     }
     var rd = new FileReader();
+    this.ui.flashResult('Abriendo ' + name + ' …');
+    this.out('Abriendo ' + name + ' (' + (file.size / 1048576).toFixed(1) + ' MB) …');
     rd.onload = function () {
+      /* un fotograma para que el aviso llegue a pintarse */
+      requestAnimationFrame(function () { setTimeout(function () { parse(); }, 0); });
+      function parse() {
+      var t0 = performance.now();
       try {
         var txt = String(rd.result);
         var doc;
@@ -803,9 +837,10 @@
         if (G.bboxValid(b)) self.r.zoomBox(b);
         self.ui.syncStatus();
         self.ui.buildRibbon();
-        self.out('Abriendo ' + name + ' …');
-        self.out(doc.entities.length + ' objeto(s), ' + doc.layerOrder.length + ' capa(s), ' +
-          Object.keys(doc.blocks).length + ' bloque(s).', 'ok');
+        self.out(doc.entities.length.toLocaleString('es-ES') + ' objeto(s), ' + doc.layerOrder.length +
+          ' capa(s), ' + Object.keys(doc.blocks).length + ' bloque(s) en ' +
+          ((performance.now() - t0) / 1000).toFixed(2) + ' s.', 'ok');
+        self.ui.flashResult(doc.entities.length.toLocaleString('es-ES') + ' objetos cargados');
         if (doc.warnings && doc.warnings.length) {
           self.out('Entidades no admitidas omitidas: ' + doc.warnings.join(', '), 'warn');
         }
@@ -813,6 +848,7 @@
       } catch (err) {
         self.out('Error al leer el archivo: ' + err.message, 'err');
         console.error(err);
+      }
       }
     };
     rd.readAsText(file);
@@ -1139,6 +1175,7 @@
   function start() {
     var app = new CAD.App();
     window.CADAPP = app;
+    CAD.APP = app;
     app.boot();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

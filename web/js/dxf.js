@@ -44,7 +44,8 @@
   Writer.prototype.entHead = function (type, ent, doc, owner, subclass) {
     this.p(0, type);
     if (this.r2000) {
-      this.p(5, this.h());
+      this.lastHandle = this.h();
+      this.p(5, this.lastHandle);
       if (owner) this.p(330, owner);
       this.p(100, 'AcDbEntity');
     }
@@ -78,9 +79,85 @@
   /* ============================================================
      Entidades
      ============================================================ */
+  /* POLYFACE MESH: una entidad POLYLINE con bandera 64, seguida de los
+     vértices (bandera 192) y de los registros de cara (bandera 128).
+     El formato admite como máximo 4 vértices por cara, así que las caras
+     con más lados se triangulan. */
+  Writer.prototype.polyface = function (mesh, ent, doc, owner) {
+    var W = this, i, j;
+    var faces = [];
+    for (i = 0; i < mesh.faces.length; i++) {
+      var f = mesh.faces[i];
+      if (f.length < 3) continue;
+      if (f.length <= 4) { faces.push(f.slice()); continue; }
+      var pts = f.map(function (k) { return mesh.verts[k]; });
+      var tri = CAD.G3.triangulate(pts);
+      if (!tri.length) { for (j = 1; j < f.length - 1; j++) faces.push([f[0], f[j], f[j + 1]]); continue; }
+      for (j = 0; j < tri.length; j++) faces.push([f[tri[j][0]], f[tri[j][1]], f[tri[j][2]]]);
+    }
+    if (!faces.length) return;
+    if (mesh.verts.length > 32767 || faces.length > 32767) { W.faces3d(mesh, faces, ent, doc, owner); return; }
+
+    W.entHead('POLYLINE', ent, doc, owner, 'AcDbPolyFaceMesh');
+    var polyH = W.lastHandle;
+    W.p(66, 1);
+    W.p(10, 0); W.p(20, 0); W.p(30, 0);
+    W.p(70, 64);
+    W.p(71, mesh.verts.length);
+    W.p(72, faces.length);
+    var lay = ent.layer || '0';
+    for (i = 0; i < mesh.verts.length; i++) {
+      var v = mesh.verts[i];
+      W.p(0, 'VERTEX');
+      if (W.r2000) { W.p(5, W.h()); W.p(330, polyH); W.p(100, 'AcDbEntity'); }
+      W.p(8, lay);
+      if (W.r2000) { W.p(100, 'AcDbVertex'); W.p(100, 'AcDbPolyFaceMeshVertex'); }
+      W.p(10, v.x); W.p(20, v.y); W.p(30, v.z);
+      W.p(70, 192);
+    }
+    for (i = 0; i < faces.length; i++) {
+      var g = faces[i];
+      W.p(0, 'VERTEX');
+      if (W.r2000) { W.p(5, W.h()); W.p(330, polyH); W.p(100, 'AcDbEntity'); }
+      W.p(8, lay);
+      if (W.r2000) { W.p(100, 'AcDbVertex'); W.p(100, 'AcDbFaceRecord'); }
+      W.p(10, 0); W.p(20, 0); W.p(30, 0);
+      W.p(70, 128);
+      W.p(71, g[0] + 1); W.p(72, g[1] + 1); W.p(73, g[2] + 1);
+      if (g.length > 3) W.p(74, g[3] + 1);
+    }
+    W.p(0, 'SEQEND');
+    if (W.r2000) { W.p(5, W.h()); W.p(330, polyH); W.p(100, 'AcDbEntity'); }
+    W.p(8, lay);
+  };
+
+  /* Malla muy grande: se trocea en entidades 3DFACE sueltas */
+  Writer.prototype.faces3d = function (mesh, faces, ent, doc, owner) {
+    var W = this;
+    for (var i = 0; i < faces.length; i++) {
+      var g = faces[i];
+      var a = mesh.verts[g[0]], b = mesh.verts[g[1]], c = mesh.verts[g[2]];
+      var d = g.length > 3 ? mesh.verts[g[3]] : c;
+      W.entHead('3DFACE', ent, doc, owner, 'AcDbFace');
+      W.p(10, a.x); W.p(20, a.y); W.p(30, a.z);
+      W.p(11, b.x); W.p(21, b.y); W.p(31, b.z);
+      W.p(12, c.x); W.p(22, c.y); W.p(32, c.z);
+      W.p(13, d.x); W.p(23, d.y); W.p(33, d.z);
+    }
+  };
+
   Writer.prototype.entity = function (ent, doc, owner) {
     var W = this;
     switch (ent.type) {
+      case 'SOLID3D': case 'MESH': {
+        /* Un sólido ACIS no se puede escribir sin la biblioteca de Spatial,
+           así que se exporta la malla teselada como POLYFACE MESH, que es
+           lo que AutoCAD lee sin ningún complemento. */
+        var mesh = CAD.Solid && CAD.Solid.meshOf(ent);
+        if (!mesh || !mesh.faces.length) break;
+        W.polyface(mesh, ent, doc, owner);
+        break;
+      }
       case 'LINE':
         W.entHead('LINE', ent, doc, owner, 'AcDbLine');
         W.pt(10, ent.p1); W.pt(11, ent.p2);
@@ -638,28 +715,47 @@
   /* ============================================================
      LECTURA
      ============================================================ */
-  function isFloatCode(c) {
-    return (c >= 10 && c <= 59) || (c >= 110 && c <= 149) || (c >= 210 && c <= 239) ||
-           (c >= 460 && c <= 469) || (c >= 1010 && c <= 1059);
-  }
-  function isIntCode(c) {
-    return (c >= 60 && c <= 79) || (c >= 90 && c <= 99) || (c >= 170 && c <= 179) ||
-           (c >= 270 && c <= 289) || (c >= 370 && c <= 389) || (c >= 400 && c <= 409) ||
-           (c >= 1060 && c <= 1070);
+  /* Tabla de tipos por código: 0 = cadena, 1 = real, 2 = entero.
+     Evita una cadena de comparaciones por cada par del archivo. */
+  var KIND = (function () {
+    var t = new Uint8Array(1100);
+    function set(a, b, v) { for (var i = a; i <= b && i < t.length; i++) t[i] = v; }
+    set(10, 59, 1); set(110, 149, 1); set(210, 239, 1); set(460, 469, 1); set(1010, 1059, 1);
+    set(60, 79, 2); set(90, 99, 2); set(170, 179, 2); set(270, 289, 2);
+    set(370, 389, 2); set(400, 409, 2); set(1060, 1070, 2);
+    return t;
+  })();
+  function isFloatCode(c) { return c < 1100 && KIND[c] === 1; }
+  function isIntCode(c) { return c < 1100 && KIND[c] === 2; }
+
+  function trimFast(s2) {
+    if (!s2) return '';
+    var a = 0, b = s2.length;
+    while (a < b && s2.charCodeAt(a) <= 32) a++;
+    while (b > a && s2.charCodeAt(b - 1) <= 32) b--;
+    return (a === 0 && b === s2.length) ? s2 : s2.slice(a, b);
   }
 
   DXF.parsePairs = function (txt) {
-    var lines = txt.split(/\r\n|\r|\n/);
-    var pairs = [];
-    for (var i = 0; i + 1 < lines.length; i += 2) {
-      var c = parseInt(lines[i].trim(), 10);
-      if (isNaN(c)) { i--; continue; }
+    var lines = txt.split('\n');
+    var n = lines.length;
+    var pairs = new Array(n >> 1);
+    var m = 0;
+    for (var i = 0; i + 1 < n; i += 2) {
+      var raw = lines[i];
+      var c = parseInt(raw, 10);
+      if (c !== c) { i--; continue; }            /* línea desalineada */
       var v = lines[i + 1];
-      if (isFloatCode(c)) v = parseFloat(v);
-      else if (isIntCode(c)) v = parseInt(v, 10) | 0;
-      else v = (v === undefined ? '' : v).trim();
-      pairs.push([c, v]);
+      if (v === undefined) break;
+      var last = v.length - 1;
+      if (last >= 0 && v.charCodeAt(last) === 13) v = v.slice(0, last);
+      var k = c < 1100 ? KIND[c] : 0;
+      if (k === 1) v = +v;
+      else if (k === 2) v = parseInt(v, 10) | 0;
+      else if (v.length && (v.charCodeAt(0) <= 32 || v.charCodeAt(v.length - 1) <= 32)) v = trimFast(v);
+      pairs[m++] = [c, v];
     }
+    pairs.length = m;
     return pairs;
   };
 
@@ -803,6 +899,70 @@
     return doc;
   };
 
+  /* POLYFACE MESH (70 & 64) y malla poligonal MxN (70 & 16) */
+  function readMesh(pairs, idx, to, o, flags, codes) {
+    if (!CAD.Solid || !CAD.Mesh) return null;
+    var G3x = CAD.G3;
+    var verts = [], faces = [];
+    var k = idx + 1;
+    while (k < to) {
+      if (pairs[k][0] === 0) {
+        if (pairs[k][1] === 'SEQEND') break;
+        if (pairs[k][1] === 'VERTEX') {
+          var vc = [], m = k + 1;
+          while (m < to && pairs[m][0] !== 0) { vc.push(pairs[m]); m++; }
+          var vf = get(vc, 70, 0);
+          if (vf & 128 && !(vf & 64)) {
+            /* registro de cara: índices con signo (negativo = arista oculta) */
+            var f = [];
+            [71, 72, 73, 74].forEach(function (c) {
+              var v = get(vc, c, 0);
+              if (v) f.push(Math.abs(v) - 1);
+            });
+            if (f.length >= 3) faces.push(f);
+          } else {
+            verts.push(G3x.v(get(vc, 10, 0), get(vc, 20, 0), get(vc, 30, 0)));
+          }
+          k = m; continue;
+        }
+      }
+      k++;
+    }
+    if (!verts.length) return null;
+    if (!faces.length && (flags & 16)) {
+      /* malla poligonal MxN: las caras se deducen de la retícula */
+      var M = get(codes, 71, 0), N = get(codes, 72, 0);
+      if (M > 1 && N > 1 && M * N <= verts.length) {
+        var closedM = !!(flags & 1), closedN = !!(flags & 32);
+        var limM = closedM ? M : M - 1, limN = closedN ? N : N - 1;
+        for (var i = 0; i < limM; i++)
+          for (var j = 0; j < limN; j++) {
+            var a = (i % M) * N + (j % N), b = ((i + 1) % M) * N + (j % N);
+            var c = ((i + 1) % M) * N + ((j + 1) % N), d = (i % M) * N + ((j + 1) % N);
+            faces.push([a, b, c, d]);
+          }
+      }
+    }
+    if (!faces.length) return null;
+    /* descarta índices fuera de rango (archivos mal formados) */
+    var ok = [];
+    for (i = 0; i < faces.length; i++) {
+      var g = faces[i], good = true;
+      for (j = 0; j < g.length; j++) if (!(g[j] >= 0 && g[j] < verts.length)) { good = false; break; }
+      if (good) ok.push(g);
+    }
+    if (!ok.length) return null;
+    var mesh = CAD.Mesh.make(verts, ok);
+    mesh.clean();
+    if (!mesh.faces.length) return null;
+    var ent = CAD.Solid.mesh(mesh, o);
+    if (CAD.Mesh.check(mesh).estanco) {
+      ent.type = 'SOLID3D';
+      if (mesh.volume() < 0) { mesh.flip(); CAD.Solid.setMesh(ent, mesh); }
+    }
+    return ent;
+  }
+
   /* Lee un rango de entidades */
   function readEntities(pairs, from, to, doc, warnings) {
     var out = [], i = from;
@@ -832,7 +992,16 @@
   }
 
   function get(codes, code, def) {
-    for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) return codes[i][1];
+    var n = codes.length;
+    if (n > 40) {
+      var m = codes._map;
+      if (!m) {
+        m = codes._map = new Map();
+        for (var j = 0; j < n; j++) if (!m.has(codes[j][0])) m.set(codes[j][0], codes[j][1]);
+      }
+      return m.has(code) ? m.get(code) : def;
+    }
+    for (var i = 0; i < n; i++) if (codes[i][0] === code) return codes[i][1];
     return def;
   }
   function getAll(codes, code) {
@@ -884,6 +1053,9 @@
       }
       case 'POLYLINE': {
         var flags = get(codes, 70, 0);
+        /* bandera 64 = POLYFACE MESH, 16 = malla poligonal: se leen como
+           malla 3D en vez de como polilínea plana */
+        if ((flags & 64) || (flags & 16)) return readMesh(pairs, idx, to, o, flags, codes);
         var vs = [], k = idx + 1;
         while (k < to) {
           if (pairs[k][0] === 0) {
@@ -951,8 +1123,23 @@
         var q2 = { x: get(codes, 12, 0), y: get(codes, 22, 0) };
         var q3 = { x: get(codes, 13, undefined), y: get(codes, 23, undefined) };
         var pts;
-        if (type === '3DFACE') pts = q3.x === undefined ? [q0, q1, q2] : [q0, q1, q2, q3];
-        else pts = (q3.x === undefined || (Math.abs(q3.x - q2.x) < 1e-9 && Math.abs(q3.y - q2.y) < 1e-9))
+        if (type === '3DFACE') {
+          /* si tiene relieve se conserva como malla 3D, no como sólido plano */
+          var zz = [get(codes, 30, 0), get(codes, 31, 0), get(codes, 32, 0), get(codes, 33, 0)];
+          if (CAD.Solid && zz.some(function (v) { return Math.abs(v) > 1e-9; })) {
+            var G3x = CAD.G3;
+            var mv = [G3x.v(q0.x, q0.y, zz[0]), G3x.v(q1.x, q1.y, zz[1]), G3x.v(q2.x, q2.y, zz[2])];
+            var mf = [[0, 1, 2]];
+            if (q3.x !== undefined && (Math.abs(q3.x - q2.x) > 1e-9 || Math.abs(q3.y - q2.y) > 1e-9 ||
+                                       Math.abs(zz[3] - zz[2]) > 1e-9)) {
+              mv.push(G3x.v(q3.x, q3.y, zz[3]));
+              mf = [[0, 1, 2, 3]];
+            }
+            return CAD.Solid.mesh(CAD.Mesh.make(mv, mf), o);
+          }
+          pts = q3.x === undefined ? [q0, q1, q2] : [q0, q1, q2, q3];
+        }
+        if (!pts) pts = (q3.x === undefined || (Math.abs(q3.x - q2.x) < 1e-9 && Math.abs(q3.y - q2.y) < 1e-9))
           ? [q0, q1, q2] : [q0, q1, q3, q2];
         return E.solid(pts, o);
       }
