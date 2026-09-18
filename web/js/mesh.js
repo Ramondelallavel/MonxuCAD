@@ -516,7 +516,13 @@
   /* ============================================================
      Primitivas
      ============================================================ */
+  /* Una medida nula, negativa o no finita no da sólido: se devuelve null
+     y quien llama avisa, en lugar de fabricar una malla degenerada. */
+  function dim(v) { return typeof v === 'number' && isFinite(v) && Math.abs(v) > 1e-12; }
+  function rad(v) { return typeof v === 'number' && isFinite(v) && v > 1e-12; }
+
   M.box = function (l, w, h, centered) {
+    if (!dim(l) || !dim(w) || !dim(h)) return null;
     var x0 = centered ? -l / 2 : 0, y0 = centered ? -w / 2 : 0, z0 = centered ? -h / 2 : 0;
     var x1 = x0 + l, y1 = y0 + w, z1 = z0 + h;
     var v = [v3(x0, y0, z0), v3(x1, y0, z0), v3(x1, y1, z0), v3(x0, y1, z0),
@@ -526,8 +532,11 @@
   };
 
   M.cylinder = function (r, h, seg, r2) {
-    seg = Math.max(3, seg || M.segFor(r));
     if (r2 === undefined) r2 = r;
+    /* un cono admite radio superior 0, pero no los dos a la vez */
+    if (!dim(h) || !isFinite(r) || !isFinite(r2) || r < 0 || r2 < 0) return null;
+    if (!rad(r) && !rad(r2)) return null;
+    seg = Math.max(3, seg || M.segFor(Math.max(r, r2)));
     var v = [], bot = [], top = [], i;
     for (i = 0; i < seg; i++) {
       var a = TAU * i / seg;
@@ -552,6 +561,7 @@
   M.cone = function (r, h, seg, rTop) { return M.cylinder(r, h, seg, rTop || 0); };
 
   M.sphere = function (r, seg, ring) {
+    if (!rad(r)) return null;
     seg = Math.max(4, seg || M.segFor(r));
     ring = Math.max(2, ring || Math.ceil(seg / 2));
     var v = [v3(0, 0, -r)], f = [], i, j;
@@ -575,6 +585,7 @@
   };
 
   M.torus = function (R, r, seg, segT) {
+    if (!rad(R) || !rad(r)) return null;
     seg = Math.max(4, seg || M.segFor(R));
     segT = Math.max(4, segT || M.segFor(r));
     var v = [], f = [], i, j;
@@ -594,6 +605,7 @@
   };
 
   M.wedge = function (l, w, h, centered) {
+    if (!dim(l) || !dim(w) || !dim(h)) return null;
     var x0 = centered ? -l / 2 : 0, y0 = centered ? -w / 2 : 0, z0 = centered ? -h / 2 : 0;
     var x1 = x0 + l, y1 = y0 + w, z1 = z0 + h;
     var v = [v3(x0, y0, z0), v3(x1, y0, z0), v3(x1, y1, z0), v3(x0, y1, z0),
@@ -603,6 +615,8 @@
   };
 
   M.pyramid = function (r, h, sides, rTop) {
+    if (!rad(r) || !dim(h)) return null;
+    if (!(sides >= 3)) sides = 4;
     sides = Math.max(3, sides || 4);
     var v = [], i, a;
     for (i = 0; i < sides; i++) {
