@@ -745,6 +745,24 @@
     this.setPrompt('Primer punto del medio: ');
   };
 
+  /* DESDE: se captura un punto de partida y el siguiente se mide como
+     desplazamiento desde él.  Es la referencia "from" de AutoCAD. */
+  App.prototype.startFrom = function () {
+    this.fromCollect = true;
+    this.out('Desde: punto base');
+    this.setPrompt('Punto base: ');
+    this.refresh();
+  };
+
+  /* Punto de rastreo temporal: se adquiere un punto para que salgan
+     de él las trayectorias de alineación, sin usarlo como dato. */
+  App.prototype.startTrackPoint = function () {
+    this.ttCollect = true;
+    this.out('Punto de rastreo temporal');
+    this.setPrompt('Precise el punto de rastreo temporal: ');
+    this.refresh();
+  };
+
   App.prototype.applyGrip = function (p) {
     var gd = this.gripDrag;
     if (!gd) return;

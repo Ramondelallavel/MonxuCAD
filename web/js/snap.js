@@ -166,11 +166,28 @@
     }
 
     var cands = [];
+    /* Con una sustitución forzada (se ha tecleado CEN, MID, END…) no se
+       exige que el punto caiga bajo la mira: basta con apuntar al objeto
+       y se devuelve su punto notable, esté donde esté.  Es como se usa
+       en AutoCAD: para capturar el centro de un círculo se señala el
+       círculo, no el hueco del medio. */
+    var forced = opts.override && opts.override !== 'none';
+    var overEnts = null;
+    if (forced) {
+      overEnts = [];
+      near.forEach(function (e) {
+        if (E.hit(e, wp, tolW, doc)) overEnts.push(e);
+      });
+    }
+
     /* puntos notables */
     near.forEach(function (e) {
       E.snapPoints(e, doc).forEach(function (s) {
         if (!active[s.type]) return;
-        if (G.dist(s.p, wp) <= tolW) cands.push({ type: s.type, p: s.p, ent: e, d: G.dist(s.p, wp) });
+        var d = G.dist(s.p, wp);
+        if (d <= tolW) { cands.push({ type: s.type, p: s.p, ent: e, d: d }); return; }
+        /* objeto señalado y referencia forzada: vale aunque esté lejos */
+        if (forced && overEnts.indexOf(e) >= 0) cands.push({ type: s.type, p: s.p, ent: e, d: d + tolW * 10 });
       });
     });
 
@@ -204,14 +221,16 @@
 
     /* perpendicular / tangente respecto al punto base */
     if ((active.per || active.tan) && opts.base) {
+      var lim = forced ? tolW * 1e6 : tolW * 1.6;
       getPrims().forEach(function (pr) {
+        if (forced && overEnts.indexOf(pr.ent) < 0 && overEnts.length) return;
         if (active.per) {
           var q = PR.perp(pr, opts.base);
-          if (q && G.dist(q, wp) <= tolW * 1.6) cands.push({ type: 'per', p: q, ent: pr.ent, d: G.dist(q, wp) * 0.9 });
+          if (q && G.dist(q, wp) <= lim) cands.push({ type: 'per', p: q, ent: pr.ent, d: G.dist(q, wp) * 0.9 });
         }
         if (active.tan) {
           PR.tangents(pr, opts.base).forEach(function (q2) {
-            if (G.dist(q2, wp) <= tolW * 1.6) cands.push({ type: 'tan', p: q2, ent: pr.ent, d: G.dist(q2, wp) * 0.9 });
+            if (G.dist(q2, wp) <= lim) cands.push({ type: 'tan', p: q2, ent: pr.ent, d: G.dist(q2, wp) * 0.9 });
           });
         }
       });

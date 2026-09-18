@@ -838,6 +838,11 @@
     });
     inp.addEventListener('input', function () {
       var v = inp.value;
+      /* El autocompletado sólo actúa en la petición "Comando:".  Dentro
+         de un comando lo que se teclea es un dato u una opción —CEN, MID,
+         @50,0— y sustituirlo por el nombre de otro comando destroza la
+         entrada, que es lo que pasaba al forzar una referencia. */
+      if (app.pending) { self.hideAC(); return; }
       if (!v || app.expectingText() || /[ ,<@]/.test(v)) { self.hideAC(); return; }
       self.acItems = Cmd.suggest(v);
       self.acIndex = self.acItems.length ? 0 : -1;

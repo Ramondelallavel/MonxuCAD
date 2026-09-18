@@ -146,6 +146,36 @@
       .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
       .replace(/[^A-Z0-9]/g, '');
   }
+  /* ============================================================
+     Sustituciones de referencia a objetos tecleadas
+     En AutoCAD, en cualquier petición de punto se puede escribir el
+     código de tres letras para forzar una referencia sólo en esa
+     captura: END, MID, CEN, INT, PER, TAN, CUA…  Además están FROM
+     (desde un punto de partida), M2P (medio entre dos puntos), TT
+     (punto de rastreo temporal) y NON (sin referencia).
+     ============================================================ */
+  var OSNAP_WORDS = {
+    END: 'end', FIN: 'end', ENDP: 'end', PUNTOFINAL: 'end',
+    MID: 'mid', MED: 'mid', PUNTOMEDIO: 'mid',
+    CEN: 'cen', CENTRO: 'cen', CENTER: 'cen',
+    GCE: 'geo', CENTROGEOMETRICO: 'geo',
+    NOD: 'nod', PUN: 'nod', NODE: 'nod', NODO: 'nod',
+    QUA: 'qua', CUA: 'qua', QUAD: 'qua', CUADRANTE: 'qua',
+    INT: 'int', INTERSECCION: 'int', INTERSECTION: 'int',
+    APP: 'app', APPINT: 'app', FIC: 'app',
+    EXT: 'ext', EXTENSION: 'ext',
+    INS: 'ins', INSERCION: 'ins', INSERT: 'ins',
+    PER: 'per', PERPENDICULAR: 'per',
+    TAN: 'tan', TANGENTE: 'tan', TANGENT: 'tan',
+    NEA: 'nea', CER: 'nea', NEAR: 'nea', CERCANO: 'nea',
+    PAR: 'par', PARALELO: 'par', PARALLEL: 'par',
+    NON: 'none', NONE: 'none', NIN: 'none', NINGUNO: 'none'
+  };
+  var OSNAP_SPECIAL = { M2P: 'm2p', MTP: 'm2p', FRO: 'from', FROM: 'from',
+                        DE: 'from', DESDE: 'from', TT: 'track', RT: 'track' };
+  CAD.OSNAP_WORDS = OSNAP_WORDS;
+  CAD.OSNAP_SPECIAL = OSNAP_SPECIAL;
+
   function matchKeyword(txt, kws) {
     if (!kws || !kws.length) return null;
     var raw = String(txt).trim().toUpperCase();
@@ -277,6 +307,28 @@
      ============================================================ */
   var Engine = CAD.Engine = {};
 
+  /* Devuelve true si el texto se ha consumido como sustitución */
+  Engine.tryOsnapWord = function (txt) {
+    var p = this.pending;
+    if (!p || (p.kind !== 'point' && p.kind !== 'dist' && p.kind !== 'angle')) return false;
+    var t = String(txt).trim().toUpperCase().replace(/^[_'"]+/, '');
+    if (!t) return false;
+    /* una sustitución nunca gana a una opción del comando */
+    if (p.opts.keywords && matchKeyword(t, p.opts.keywords)) return false;
+    var sp = OSNAP_SPECIAL[t];
+    if (sp === 'm2p') { this.out('_m2p', 'echo'); this.startMidBetween(); return true; }
+    if (sp === 'from') { this.out('_from', 'echo'); this.startFrom(); return true; }
+    if (sp === 'track') { this.out('_tt', 'echo'); this.startTrackPoint(); return true; }
+    var k = OSNAP_WORDS[t];
+    if (!k) return false;
+    this.osnapOverride = k;
+    this.out('_' + k, 'echo');
+    var lbl = k === 'none' ? 'Ninguno' : (CAD.SNAP_LABEL && CAD.SNAP_LABEL[k]) || k;
+    this.setPrompt(p.text.replace(/: $/, '') + '  (' + lbl + '): ');
+    this.refresh();
+    return true;
+  };
+
   Engine.out = function (s, cls) {
     if (this.ui && this.ui.log) this.ui.log(s, cls);
   };
@@ -390,6 +442,10 @@
     var p = this.pending;
     if (!p) { this.exec(txt); return; }
     var t = String(txt);
+
+    /* sustitución de referencia a objetos escrita a mano */
+    if (this.tryOsnapWord(t)) return;
+
     this.out(p.text + t, 'echo');
 
     /* palabras clave */
@@ -484,6 +540,32 @@
   Engine.acceptPoint = function (pt) {
     var p = this.pending;
     if (!p) return;
+
+    /* referencia "desde": el primer punto fija el origen y el siguiente
+       se interpreta como desplazamiento respecto de él */
+    if (this.fromCollect === true) {
+      this.fromCollect = { x: pt.x, y: pt.y, z: pt.z };
+      this.fromBase = this.fromCollect;
+      p.opts.base = this.fromCollect;
+      this.lastPoint = { x: pt.x, y: pt.y, z: pt.z };
+      this.setPrompt('<Desfase>: ');
+      this.refresh();
+      return;
+    }
+    if (this.fromCollect && this.fromCollect.x !== undefined) {
+      this.fromCollect = null;
+      this.fromBase = null;
+    }
+
+    /* punto de rastreo temporal: se adquiere y se sigue pidiendo el punto */
+    if (this.ttCollect) {
+      this.ttCollect = null;
+      if (CAD.Track && CAD.Track.acquire) CAD.Track.acquire({ x: pt.x, y: pt.y });
+      this.setPrompt(p.text);
+      this.refresh();
+      return;
+    }
+
     /* referencia "punto medio entre 2 puntos" */
     if (this.mtpCollect) {
       this.mtpCollect.push({ x: pt.x, y: pt.y });
