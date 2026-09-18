@@ -987,18 +987,28 @@
     if (!num(ang)) ang = 60;
     ctx.out('Calculando empalmes…');
     ctx.doc.mark('EMPALMEARISTA');
-    var done = 0;
+    var done = 0, aviso = null;
     for (var i = 0; i < sol.length; i++) {
       var mesh = S.meshOf(sol[i]);
       if (!mesh) continue;
-      var res = filletByEdges(mesh, r, ang);
+      var inf = {};
+      var res = filletByEdges(mesh, r, ang, inf);
       if (!res) continue;
-      S.setMesh(sol[i], res, ctx.doc);
+      /* queda como una operación más del árbol: después se le puede
+         cambiar el radio o suprimirla */
+      var e2 = S.solid({ op: 'fillet', r: r, ang: ang, src: S.nodeOf(sol[i]) },
+                       { layer: sol[i].layer, color: sol[i].color });
+      ctx.doc.remove(sol[i]);
+      ctx.doc.add(e2);
+      if (ctx.app.is3D) ctx.app.v3dDirty();
       done++;
+      aviso = inf;
     }
     if (!done) { ctx.doc.discardTx(); ctx.err('No se ha encontrado ninguna arista que empalmar.'); return; }
     ctx.app.refresh(true);
-    ctx.out(done + ' sólido(s) con aristas empalmadas R' + G.fmt(r, 3) + '.');
+    ctx.out(done + ' sólido(s) con aristas empalmadas R' + G.fmt(r, 3) + '.' +
+            (aviso && aviso.rechazados ? '   ' + aviso.hechos + ' de ' + aviso.total +
+             ' cadenas de aristas; ' + aviso.rechazados + ' no admiten ese radio y se han dejado vivas.' : ''));
   });
 
   /* Genera el prisma de recorte de una arista viva.
@@ -1064,36 +1074,89 @@
       var ov = Math.max(size, dist) * 0.02 + 1e-6;
       var prism = M.extrude(sec.map(function (q) { return G3.sub(q, G3.mul(t, ov)); }),
                             G3.mul(t, L + ov * 2));
-      if (prism && prism.faces.length) out.push(prism);
+      if (prism && prism.faces.length) out.push({ mesh: prism, a: e.a, b: e.b });
     }
     return out;
   }
 
+  /* Agrupa los recortes en cadenas de aristas conectadas: el borde de un
+     taladro es una sola cadena y se recorta de una vez, en lugar de
+     arista a arista.  Tratarlas sueltas hacía que los recortes vecinos se
+     solaparan, que muchos se rechazaran y que el borde saliera desigual. */
+  function agrupaCadenas(cutters) {
+    var padre = {};
+    function raiz(x) { while (padre[x] !== undefined && padre[x] !== x) x = padre[x]; return x; }
+    function une(x, y) { var rx = raiz(x), ry = raiz(y); if (rx !== ry) padre[rx] = ry; }
+    cutters.forEach(function (c) {
+      if (padre[c.a] === undefined) padre[c.a] = c.a;
+      if (padre[c.b] === undefined) padre[c.b] = c.b;
+      une(c.a, c.b);
+    });
+    var grupos = {};
+    cutters.forEach(function (c) {
+      var k = raiz(c.a);
+      if (!grupos[k]) grupos[k] = [];
+      grupos[k].push(c.mesh);
+    });
+    var out = [];
+    Object.keys(grupos).forEach(function (k) {
+      var g = grupos[k];
+      if (g.length === 1) { out.push(g[0]); return; }
+      /* se unen los recortes de la cadena en una sola herramienta */
+      var u = g[0];
+      for (var i = 1; i < g.length; i++) {
+        try { var n2 = CSG.union(u, g[i]); if (n2 && n2.faces.length) u = n2; }
+        catch (e) { out.push(g[i]); }
+      }
+      out.push(u);
+    });
+    return out;
+  }
+
   /* Aplica los prismas de recorte al sólido */
-  function applyCutters(mesh, cutters) {
+  /* Aplica los prismas de recorte uno a uno, comprobando cada paso.
+
+     Encadenar cientos de booleanos sin mirar el resultado era peligroso:
+     bastaba con que uno saliera mal para que los siguientes trabajaran
+     sobre una malla rota y la pieza acabara con un volumen ridículo.
+     Ahora cada recorte se acepta sólo si deja la malla cerrada y quita
+     una cantidad de material razonable; si no, se descarta ese recorte y
+     se sigue con el anterior, que sí era válido. */
+  function applyCutters(mesh, cutters, informe) {
     if (!cutters.length) return null;
-    var res = mesh, done = 0;
+    var res = mesh, done = 0, rechazados = 0;
+    var v0 = Math.abs(mesh.volume());
+    var chk0 = CAD.Mesh.check(mesh);
+    var exigirCerrada = chk0.estanco;
+    var maxPorRecorte = v0 * 0.25;      /* un empalme nunca se come un cuarto de la pieza */
     for (var i = 0; i < cutters.length; i++) {
       var c = cutters[i];
       try {
-        var inter = CSG.intersect(res, c);
-        if (!inter || !inter.faces.length) continue;
-        if (Math.abs(inter.volume()) < 1e-9) continue;
-        var next = CSG.subtract(res, inter);
-        if (!next || !next.faces.length) continue;
+        var vAntes = Math.abs(res.volume());
+        var next = CSG.subtract(res, c);
+        if (!next || !next.faces.length) { rechazados++; continue; }
+        var vDespues = Math.abs(next.volume());
+        if (!isFinite(vDespues) || vDespues <= 0) { rechazados++; continue; }
+        if (vDespues > vAntes + 1e-6) { rechazados++; continue; }          /* añadir material: imposible */
+        if (vAntes - vDespues > maxPorRecorte) { rechazados++; continue; } /* se come demasiado */
+        if (exigirCerrada && !CAD.Mesh.check(next).estanco) { rechazados++; continue; }
         res = next;
         done++;
-      } catch (err) { continue; }
+      } catch (err) { rechazados++; continue; }
     }
+    if (informe) { informe.hechos = done; informe.rechazados = rechazados; informe.total = cutters.length; }
     return done ? res : null;
   }
 
-  function filletByEdges(mesh, r, angDeg) {
-    return applyCutters(mesh, edgeCutters(mesh, r, angDeg, true));
+  function filletByEdges(mesh, r, angDeg, informe) {
+    return applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, r, angDeg, true)), informe);
   }
-  function chamferByEdges(mesh, d, angDeg) {
-    return applyCutters(mesh, edgeCutters(mesh, d, angDeg, false));
+  function chamferByEdges(mesh, d, angDeg, informe) {
+    return applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, d, angDeg, false)), informe);
   }
+  /* se exponen para que el árbol de operaciones pueda rehacerlas */
+  CAD.CSG.filletMesh = function (mesh, r, ang) { return filletByEdges(mesh, r, ang, null); };
+  CAD.CSG.chamferMesh = function (mesh, d, ang) { return chamferByEdges(mesh, d, ang, null); };
 
   Cmd.add(['CHAFLANARISTA', 'CHAMFEREDGE'], { group: '3d', icon: 'chamferedge', title: 'Achaflanar arista' },
   async function (ctx) {
@@ -1107,18 +1170,26 @@
     if (!num(ang)) ang = 60;
     ctx.out('Calculando chaflanes…');
     ctx.doc.mark('CHAFLANARISTA');
-    var done = 0;
+    var done = 0, aviso2 = null;
     for (var i = 0; i < sol.length; i++) {
       var mesh = S.meshOf(sol[i]);
       if (!mesh) continue;
-      var res = chamferByEdges(mesh, d, ang);
+      var inf2 = {};
+      var res = chamferByEdges(mesh, d, ang, inf2);
       if (!res) continue;
-      S.setMesh(sol[i], res, ctx.doc);
+      var e3 = S.solid({ op: 'chamfer', d: d, ang: ang, src: S.nodeOf(sol[i]) },
+                       { layer: sol[i].layer, color: sol[i].color });
+      ctx.doc.remove(sol[i]);
+      ctx.doc.add(e3);
+      if (ctx.app.is3D) ctx.app.v3dDirty();
       done++;
+      aviso2 = inf2;
     }
     if (!done) { ctx.doc.discardTx(); ctx.err('No se ha encontrado ninguna arista que achaflanar.'); return; }
     ctx.app.refresh(true);
-    ctx.out(done + ' sólido(s) con aristas achaflanadas ' + G.fmt(d, 3) + '.');
+    ctx.out(done + ' sólido(s) con aristas achaflanadas ' + G.fmt(d, 3) + '.' +
+            (aviso2 && aviso2.rechazados ? '   ' + aviso2.hechos + ' de ' + aviso2.total +
+             ' cadenas de aristas; ' + aviso2.rechazados + ' no admiten esa distancia y se han dejado vivas.' : ''));
   });
 
 })();

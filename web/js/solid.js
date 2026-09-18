@@ -48,6 +48,8 @@
       case 'loft':     return M.loft((h.secs || []).map(pts), h.opts || {});
       case 'mesh':     return M.make(pts(h.verts), h.faces.map(function (f) { return f.slice(); }));
       case 'bool':     return evalBool(h);
+      case 'fillet':   return evalRedondeo(h, true);
+      case 'chamfer':  return evalRedondeo(h, false);
       default:         return ent.mesh ? M.make(pts(ent.mesh.verts), ent.mesh.faces) : null;
     }
   };
@@ -80,6 +82,23 @@
     return acc;
   }
 
+  /* Empalme o chaflán de aristas como operación del árbol: se reconstruye
+     sobre el sólido de origen, así que se le puede cambiar el radio. */
+  function evalRedondeo(h, round) {
+    if (!h.src) return null;
+    var base = S.evaluate({ hist: h.src.hist, mesh: h.src.mesh });
+    if (!base) return null;
+    if (h.src.m) { base = base.clone(); base.transform(h.src.m); }
+    var CSG = CAD.CSG;
+    var fn = round ? CSG.filletMesh : CSG.chamferMesh;
+    if (typeof fn !== 'function') return base;
+    var r = round ? h.r : h.d;
+    if (!(r > 0)) return base;
+    var res = null;
+    try { res = fn(base, r, h.ang); } catch (e) { res = null; }
+    return (res && res.faces.length) ? res : base;
+  }
+
   /* Nodo de árbol a partir de una entidad 3D */
   S.nodeOf = function (ent) {
     var nd = { hist: ent.hist ? JSON.parse(JSON.stringify(ent.hist)) : null,
@@ -93,7 +112,8 @@
     box: 'Prisma', cylinder: 'Cilindro', cone: 'Cono', sphere: 'Esfera',
     torus: 'Toroide', wedge: 'Cuña', pyramid: 'Pirámide',
     extrude: 'Extrusión', revolve: 'Revolución', sweep: 'Barrido',
-    loft: 'Solevado', mesh: 'Malla', bool: 'Operación booleana'
+    loft: 'Solevado', mesh: 'Malla', bool: 'Operación booleana',
+    fillet: 'Empalme de aristas', chamfer: 'Chaflán de aristas'
   };
   var BOOLNAMES = { union: 'Unión', diff: 'Diferencia', inter: 'Intersección' };
   S.opName = function (h) {
@@ -112,7 +132,9 @@
     torus: [['R', 'Radio mayor'], ['r', 'Radio del tubo']],
     pyramid: [['r', 'Radio'], ['h', 'Altura'], ['sides', 'Lados'], ['r2', 'Radio superior']],
     revolve: [['angle', 'Ángulo'], ['seg', 'Segmentos']],
-    extrude: [['taper', 'Conicidad']]
+    extrude: [['taper', 'Conicidad']],
+    fillet: [['r', 'Radio'], ['ang', 'Ángulo mínimo']],
+    chamfer: [['d', 'Distancia'], ['ang', 'Ángulo mínimo']]
   };
   S.paramsOf = function (h) {
     if (!h) return [];
@@ -141,6 +163,8 @@
           var pref = (h.kind === 'diff' && i > 0) ? 'Resta: ' : '';
           rec(nd.hist, nivel + 1, ruta.concat(i), pref + (nd.nombre || S.opName(nd.hist)));
         }
+      } else if ((h.op === 'fillet' || h.op === 'chamfer') && h.src) {
+        rec(h.src.hist, nivel + 1, ruta.concat(0), h.src.nombre || S.opName(h.src.hist));
       }
     }
     rec(ent.hist, 0, [], null);
@@ -151,8 +175,10 @@
   S.histAt = function (ent, ruta) {
     var h = ent.hist;
     for (var i = 0; i < ruta.length; i++) {
-      if (!h || h.op !== 'bool' || !h.nodes || !h.nodes[ruta[i]]) return null;
-      h = h.nodes[ruta[i]].hist;
+      if (!h) return null;
+      if (h.op === 'bool' && h.nodes && h.nodes[ruta[i]]) { h = h.nodes[ruta[i]].hist; continue; }
+      if ((h.op === 'fillet' || h.op === 'chamfer') && h.src && ruta[i] === 0) { h = h.src.hist; continue; }
+      return null;
     }
     return h;
   };
