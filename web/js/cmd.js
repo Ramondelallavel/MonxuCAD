@@ -299,6 +299,7 @@
     /* si entretanto se inició otro comando, no se toca su estado */
     if (seq !== undefined && seq !== this.cmdSeq) return;
     if (this.doc && this.doc.commitTx) this.doc.commitTx();
+    if (this.clearPendBox) this.clearPendBox();
     this.pending = null;
     this.activeCmd = null;
     this.activeCtx = null;
@@ -318,6 +319,7 @@
   };
 
   Engine.cancel = function (silent) {
+    if (this.clearPendBox) this.clearPendBox();
     this.mtpCollect = null;
     this.osnapOverride = null;
     this.multipleCmd = null;
@@ -486,14 +488,16 @@
     return null;
   };
 
-  Engine.feedPick = function (sp, wp, ent) {
+  Engine.feedPick = function (sp, wp, ent, shift) {
     var p = this.pending;
     if (!p) return false;
     if (p.kind === 'point') { this.acceptPoint(wp); return true; }
     if (p.kind === 'entity') {
       if (!ent) { this.out('No se encontró ningún objeto.', 'warn'); this.setPrompt(p.text); return true; }
       if (p.opts.filter && !p.opts.filter(ent)) { this.out('Objeto no válido.', 'warn'); this.setPrompt(p.text); return true; }
-      this.resolve({ ent: ent, p: wp });
+      /* La tecla Mayús viaja con la designación: comandos como RECORTA
+         la usan para invertir la operación sin salir del bucle. */
+      this.resolve({ ent: ent, p: wp, shift: !!shift });
       return true;
     }
     if (p.kind === 'select') {

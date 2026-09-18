@@ -1,0 +1,56 @@
+# Publica la aplicación en GitHub Pages.
+# Para activarlo, una sola vez: Settings ▸ Pages ▸ Source = "GitHub Actions".
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar el sitio
+        run: |
+          mkdir -p _site
+          cp -r web/* _site/
+          # El puente DWG necesita el servicio Node, que no existe en Pages.
+          rm -f _site/js/dwgbridge.js
+          sed -i '/dwgbridge\.js/d' _site/index.html
+          # Evita que Jekyll se coma los archivos que empiezan por guion bajo.
+          touch _site/.nojekyll
+
+      - name: Comprobar que no falta ningún script
+        run: |
+          fallo=0
+          for f in $(grep -o 'js/[a-z0-9-]*\.js' _site/index.html | sort -u); do
+            if [ ! -f "_site/$f" ]; then echo "FALTA: $f"; fallo=1; fi
+          done
+          exit $fallo
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

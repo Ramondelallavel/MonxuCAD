@@ -54,6 +54,7 @@
     this.wireCanvas();
     this.wireKeys();
     this.wireFile();
+    this.initInput();
 
     window.addEventListener('resize', function () { self.resize(); });
     if (window.ResizeObserver) {
@@ -230,7 +231,7 @@
 
       var ent = self.pickAt(sp);
       /* ciclo de selección cuando hay varios objetos superpuestos */
-      if (!self.pending && !e.shiftKey && self.doc.vars.SELECTIONCYCLING) {
+      if (!self.pending && !e.shiftKey && self.doc.vars.SELECTIONCYCLING >= 2) {
         var all = self.pickAllAt(sp);
         if (all.length > 1) {
           self.ui.cycleMenu(all, sp, function (chosen) {
@@ -242,11 +243,11 @@
         }
       }
       if (self.pending && (self.pending.kind === 'point' || self.pending.kind === 'dist' || self.pending.kind === 'angle' || self.pending.kind === 'real')) {
-        self.feedPick(sp, self.cursorWorld, ent);
+        self.feedPick(sp, self.cursorWorld, ent, e.shiftKey);
         return;
       }
       if (self.pending && self.pending.kind === 'entity') {
-        self.feedPick(sp, self.cursorWorld, ent);
+        self.feedPick(sp, self.cursorWorld, ent, e.shiftKey);
         return;
       }
       if (ent && (!self.pending || self.pending.kind === 'select')) {
@@ -256,7 +257,11 @@
         self.refresh();
         return;
       }
-      /* ventana de designación */
+      /* Ventana de designación.  AutoCAD admite las dos formas
+         (PICKDRAG = 2): pulsar y arrastrar, o dar un clic, mover y dar
+         otro clic.  La segunda es la de fábrica y es la que se echaba
+         en falta aquí. */
+      if (self.pendBox) { self.closePendBox(sp, e.shiftKey); return; }
       drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey, path: [sp], plen: 0 };
     });
 
@@ -279,6 +284,25 @@
         return;
       }
       self.updateCursor(sp, e);
+      if (!drag && self.pendBox) {
+        var pb = self.pendBox;
+        var lastP = pb.path[pb.path.length - 1];
+        var st = Math.hypot(sp.x - lastP.x, sp.y - lastP.y);
+        if (st > 3) { pb.plen += st; pb.path.push({ x: sp.x, y: sp.y }); }
+        var ch = Math.hypot(sp.x - pb.startScreen.x, sp.y - pb.startScreen.y);
+        pb.lasso = pb.plen > Math.max(60, ch * 1.7);
+        var cr = self.cursorWorld.x < pb.start.x;
+        if (self.pending && self.pending.forceMode) cr = self.pending.forceMode === 'crossing';
+        if (pb.lasso) {
+          self.pickBox = null;
+          self.lassoPath = { pts: pb.path.map(function (q) { return self.r.s2w(q); }), crossing: cr };
+        } else {
+          self.lassoPath = null;
+          self.pickBox = { p1: pb.start, p2: self.cursorWorld, crossing: cr };
+        }
+        self.refresh();
+        return;
+      }
       if (drag && drag.mode === 'box') {
         var last = drag.path[drag.path.length - 1];
         var step = Math.hypot(sp.x - last.x, sp.y - last.y);
@@ -327,10 +351,14 @@
             var hit = self.doc.selectable().filter(function (en) { return E.hitBox(en, box, crossing, self.doc); });
             self.removeFromSelection(hit);
           } else self.selectBox(drag.start, self.cursorWorld, crossing);
-        } else if (!self.pending) {
-          self.selSet = [];
-        } else if (self.pending.kind === 'select') {
-          self.out('No se encontró ningún objeto.', 'warn');
+        } else {
+          /* clic sin arrastre sobre el vacío: queda a la espera del
+             segundo clic para cerrar la ventana */
+          self.pendBox = { start: drag.start, startScreen: drag.startScreen,
+                           shift: drag.shift, path: [drag.startScreen], plen: 0, t: Date.now() };
+          drag = null;
+          self.refresh();
+          return;
         }
         self.pickBox = null;
       }
@@ -358,11 +386,13 @@
       self.refresh();
     }, { passive: false });
 
+    /* El menú contextual lo gobierna input.js (pulsación corta = Intro,
+       larga = menú), igual que AutoCAD.  Aquí sólo quedan los casos
+       que se adelantan a esa lógica. */
     cv.addEventListener('contextmenu', function (e) {
       e.preventDefault();
       if (self.realtimePan || self.realtimeZoom) { self.endRealtime(); return; }
       if (e.shiftKey) { self.ui.osnapMenu(e.clientX, e.clientY); return; }
-      self.ui.contextMenu(e.clientX, e.clientY);
     });
 
     cv.addEventListener('dblclick', function (e) {
@@ -391,6 +421,54 @@
       else self.ui.togglePalette('props', true);
       self.refresh();
     });
+  };
+
+  /* Cierra la ventana de designación abierta con el primer clic */
+  App.prototype.closePendBox = function (sp, shift) {
+    var pb = this.pendBox;
+    this.pendBox = null;
+    if (!pb) return;
+    var moved = Math.abs(sp.x - pb.startScreen.x) > 3 || Math.abs(sp.y - pb.startScreen.y) > 3;
+    if (!moved) {
+      /* dos clics en el mismo sitio: se entiende como "no designar nada" */
+      this.pickBox = null;
+      this.lassoPath = null;
+      if (!this.pending) this.selSet = [];
+      else if (this.pending.kind === 'select') this.out('No se encontró ningún objeto.', 'warn');
+      this.refresh();
+      return;
+    }
+    var crossing = this.cursorWorld.x < pb.start.x;
+    if (this.pending && this.pending.forceMode) {
+      crossing = this.pending.forceMode === 'crossing';
+      this.pending.forceMode = null;
+    }
+    if (pb.lasso) {
+      var poly = pb.path.map(function (q) { return this.r.s2w(q); }, this);
+      var hitL = this.selectLasso(poly, crossing);
+      if (shift) this.removeFromSelection(hitL); else this.addToSelection(hitL);
+    } else {
+      var box = {
+        x1: Math.min(pb.start.x, this.cursorWorld.x), y1: Math.min(pb.start.y, this.cursorWorld.y),
+        x2: Math.max(pb.start.x, this.cursorWorld.x), y2: Math.max(pb.start.y, this.cursorWorld.y)
+      };
+      this.lastSelBox = box;
+      if (shift) {
+        var self = this;
+        var hit = this.doc.selectable().filter(function (en) { return E.hitBox(en, box, crossing, self.doc); });
+        this.removeFromSelection(hit);
+      } else this.selectBox(pb.start, this.cursorWorld, crossing);
+    }
+    this.pickBox = null;
+    this.lassoPath = null;
+    this.refresh();
+  };
+
+  App.prototype.clearPendBox = function () {
+    if (!this.pendBox) return;
+    this.pendBox = null;
+    this.pickBox = null;
+    this.lassoPath = null;
   };
 
   App.prototype.pushLayerState = function () {
@@ -742,8 +820,7 @@
         return;
       }
       if (e.key === 'Enter' && self.realtimeDone) { e.preventDefault(); self.endRealtime(); return; }
-      /* cualquier otra tecla imprimible va a la línea de comandos */
-      if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) self.focusCmd();
+      /* el reenvío de teclas a la línea de comandos lo hace input.js */
     });
 
     /* entrada dinámica: escribir en los campos flotantes */
