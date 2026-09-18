@@ -519,9 +519,19 @@
   });
 
   wrap('transform', function (ent, m, doc) {
-    /* matriz 2D (6 valores a,b,c,d,e,f) -> matriz 4x4 */
-    var m4 = m.length === 16 ? m
-      : [m[0], m[1], 0, 0, m[2], m[3], 0, 0, 0, 0, 1, 0, m[4], m[5], 0, 1];
+    /* La matriz 2D es un objeto {a,b,c,d,e,f}, no una lista: leerla por
+       índices daba seis "undefined" y la pieza se venía abajo.  Le pasaba
+       a todo comando de modificación del 2D —DESPLAZA, COPIA, GIRA,
+       ESCALA, SIMETRÍA, MATRIZ...— aplicado a un sólido o una malla. */
+    if (!m) return ent;
+    var m4;
+    if (m.length === 16) m4 = m;
+    else if (m.a !== undefined)
+      m4 = [m.a, m.b, 0, 0, m.c, m.d, 0, 0, 0, 0, 1, 0, m.e, m.f, 0, 1];
+    else if (m.length >= 6)
+      m4 = [m[0], m[1], 0, 0, m[2], m[3], 0, 0, 0, 0, 1, 0, m[4], m[5], 0, 1];
+    else return ent;
+    for (var i = 0; i < 16; i++) if (!isFinite(m4[i])) return ent;
     return S.xform(ent, m4, doc);
   });
 

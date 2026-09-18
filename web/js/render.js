@@ -325,7 +325,11 @@
     this.drawEntities(CAD.queryVisible(app, wb), doc, wb);
   };
 
-  var BATCHABLE = { LINE: 1, LWPOLYLINE: 1, CIRCLE: 1, ARC: 1, ELLIPSE: 1, SPLINE: 1 };
+  /* Los sólidos y las mallas entran en el lote como cualquier otro
+     objeto: su polilínea de visualización la da E.dispOf, igual que la de
+     una spline.  Sin ellos aquí, una pieza modelada en 3D desaparecía al
+     volver al espacio de dibujo y tampoco salía en las presentaciones. */
+  var BATCHABLE = { LINE: 1, LWPOLYLINE: 1, CIRCLE: 1, ARC: 1, ELLIPSE: 1, SPLINE: 1, SOLID3D: 1, MESH: 1 };
 
   Renderer.prototype.drawEntities = function (list, doc, wbox) {
     var ctx = this.ctx, self = this;
@@ -746,6 +750,19 @@
         break;
       }
       case 'DIMENSION': case 'LEADER': this.drawDim(ctx, ent, doc, col, o); break;
+      default: {
+        /* Cualquier otro tipo —sólidos, mallas y lo que venga— se dibuja
+           con su polilínea de visualización.  Antes, un tipo que no
+           estuviera en esta lista sencillamente no se pintaba: ni el
+           objeto, ni su resalte al designarlo. */
+        var segsD = E.dispOf(ent, doc, this.quality ? this.quality() : 1);
+        if (segsD) for (var iD = 0; iD < segsD.length; iD++) {
+          if (!segsD[iD].pts || segsD[iD].pts.length < 2) continue;
+          this.pathPts(ctx, segsD[iD].pts, segsD[iD].closed);
+          ctx.stroke();
+        }
+        break;
+      }
     }
     ctx.restore();
   };

@@ -265,7 +265,7 @@
       vars: deep(this.vars),
       nextId: this.nextId,
       layouts: this.layouts.map(function (l) {
-        return { name: l.name, w: l.w, h: l.h, margin: l.margin, viewports: deep(l.viewports) };
+        return { name: l.name, w: l.w, h: l.h, margin: l.margin, viewports: deep(l.viewports), vpInit: !!l.vpInit };
       })
     };
   };
@@ -286,6 +286,7 @@
       if (!t) return;
       t.name = l.name; t.w = l.w; t.h = l.h; t.margin = l.margin;
       t.viewports = deep(l.viewports);
+      t.vpInit = !!l.vpInit;
     });
   };
 

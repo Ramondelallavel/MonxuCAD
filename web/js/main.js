@@ -191,6 +191,31 @@
     this.refresh();
   };
 
+  /* La primera vez que se abre una presentación se le pone una ventana
+     gráfica que encuadra el modelo, como hace AutoCAD ("crear ventana en
+     presentaciones nuevas").  Sin ella la hoja salía en blanco y no había
+     manera de ver el dibujo desde la presentación.  Se marca la hoja para
+     no rehacerla si luego se borra la ventana a propósito. */
+  App.prototype.primeraVentana = function (lay) {
+    if (!lay || lay.vpInit) return;
+    lay.vpInit = true;
+    if (lay.viewports && lay.viewports.length) return;
+    var m = lay.margin || 10;
+    var rect = { x: m, y: m, w: lay.w - 2 * m, h: lay.h - 2 * m };
+    if (rect.w < 5 || rect.h < 5) return;
+    var b = E.extentsAll(this.doc.entities, this.doc);
+    if (!G.bboxValid(b)) b = { x1: 0, y1: 0, x2: 100, y2: 100 };
+    var sc = Math.min(rect.w / Math.max(1e-6, b.x2 - b.x1),
+                      rect.h / Math.max(1e-6, b.y2 - b.y1)) * 0.92;
+    if (!isFinite(sc) || sc <= 0) sc = 1;
+    lay.viewports.push({
+      x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+      cx: (b.x1 + b.x2) / 2, cy: (b.y1 + b.y2) / 2,
+      scale: sc, locked: false, on: true, frozen: []
+    });
+    this.doc.rev++;
+  };
+
   App.prototype.setLayout = function (i) {
     if (i >= 0 && !(this.doc.layouts && this.doc.layouts[i])) return;
     /* Volver a pulsar la pestaña en la que ya se está normaliza el
@@ -214,6 +239,7 @@
     this.layout = i >= 0 ? this.doc.layouts[i] : null;
     this.doc.setSpace(this.paperMode ? this.layout.entities : null);
     if (this.paperMode) {
+      this.primeraVentana(this.layout);
       this.r.zoomBox({ x1: -18, y1: -18, x2: this.layout.w + 18, y2: this.layout.h + 18 });
       /* copia, nunca el mismo objeto: si se comparte, encuadrar en el
          modelo movía también la vista guardada de la presentación */
