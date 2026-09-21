@@ -78,6 +78,7 @@
     if (lt && lt !== 'ByLayer' && lt !== 'BYLAYER') this.p(6, ltName(lt, this.r2000));
     if (ent.lw !== undefined && ent.lw !== -1 && this.r2000) this.p(370, ent.lw);
     if (ent.ltscale && ent.ltscale !== 1) this.p(48, ent.ltscale);
+    if (this.r2000 && ent.transparency) this.p(440, transCodigo(ent.transparency));
     if (this.r2000 && subclass) this.p(100, subclass);
     return this;
   };
@@ -424,6 +425,12 @@
     this.entity(proxy, doc, owner);
   };
 
+  /* Transparencia de una entidad, en el formato del grupo 440 */
+  function transCodigo(t) {
+    var pct = Math.max(0, Math.min(100, Number(t) || 0));
+    return 0x02000000 | Math.round(255 - pct * 2.55);
+  }
+
   function sanitize(s) {
     return String(s === undefined || s === null ? '' : s).replace(/\r/g, '').replace(/\n/g, '\\P');
   }
@@ -701,6 +708,7 @@
         W.p(370, l.lw === undefined ? -3 : l.lw);
         W.p(390, W.fixed.placeholder);
         if (!l.plot) W.p(290, 0);
+        if (l.transparency) W.p(440, transCodigo(l.transparency));
       }
     });
     W.p(0, 'ENDTAB');
@@ -874,6 +882,11 @@
     set(10, 59, 1); set(110, 149, 1); set(210, 239, 1); set(460, 469, 1); set(1010, 1059, 1);
     set(60, 79, 2); set(90, 99, 2); set(170, 179, 2); set(270, 289, 2);
     set(370, 389, 2); set(400, 409, 2); set(1060, 1070, 2);
+    /* Faltaban los enteros largos: color verdadero (420), transparencia
+       (440) y los identificadores de 450 en adelante llegaban como
+       cadena.  El color colaba de milagro porque al desplazar bits se
+       convierte solo; la transparencia no colaba. */
+    set(420, 429, 2); set(440, 449, 2); set(450, 459, 2); set(1071, 1071, 2);
     return t;
   })();
   function isFloatCode(c) { return c < 1100 && KIND[c] === 1; }
@@ -972,6 +985,7 @@
         else if (c === 6) rec.ltype = String(v);
         else if (c === 370) rec.lw = v;
         else if (c === 290) rec.plot = !!v;
+        else if (c === 440) rec.trans = v;
         /* en un estilo de texto el grupo 3 es el fichero de fuente, no
            una descripción: como se guardaba siempre en `desc`, ningún
            estilo importado conservaba su tipo de letra y todos salían
@@ -995,7 +1009,9 @@
             color: Math.abs(rec.color === undefined ? 7 : rec.color) || 7,
             ltype: rec.ltype || 'CONTINUOUS',
             lw: rec.lw === undefined ? -3 : rec.lw,
-            plot: rec.plot === undefined ? true : rec.plot
+            plot: rec.plot === undefined ? true : rec.plot,
+            transparency: (rec.trans !== undefined && (Number(rec.trans) & 0x02000000))
+              ? Math.max(0, Math.min(100, Math.round((255 - (Number(rec.trans) & 255)) / 2.55))) : 0
           });
         } else if (rec.t === 'LTYPE') {
           if (rec.name !== 'ByLayer' && rec.name !== 'ByBlock' && rec.name.toUpperCase() !== 'BYLAYER' && rec.name.toUpperCase() !== 'BYBLOCK') {
@@ -1280,6 +1296,15 @@
     o.ltype = lt === undefined ? 'ByLayer' : String(lt);
     var lw = get(codes, 370, undefined);
     o.lw = lw === undefined ? -1 : lw;
+    /* Transparencia: el grupo 440 lleva 0x02000000 más el alfa en el
+       byte bajo, de 0 (del todo transparente) a 255 (opaco).  El
+       programa la guarda como porcentaje de transparencia, al revés.
+       No se leía, así que un sombreado traslúcido llegaba opaco. */
+    var tr = get(codes, 440, undefined);
+    if (tr !== undefined && (Number(tr) & 0x02000000)) {
+      var alfa = Number(tr) & 255;
+      o.transparency = Math.max(0, Math.min(100, Math.round((255 - alfa) / 2.55)));
+    }
     return o;
   }
 
