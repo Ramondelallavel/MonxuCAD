@@ -1007,6 +1007,7 @@
     if (!done) { ctx.doc.discardTx(); ctx.err('No se ha encontrado ninguna arista que empalmar.'); return; }
     ctx.app.refresh(true);
     ctx.out(done + ' sólido(s) con aristas empalmadas R' + G.fmt(r, 3) + '.' +
+            (aviso && aviso.concavas ? '   ' + aviso.concavas + ' rincón(es) rellenado(s).' : '') +
             (aviso && aviso.rechazados ? '   ' + aviso.hechos + ' de ' + aviso.total +
              ' cadenas de aristas; ' + aviso.rechazados + ' no admiten ese radio y se han dejado vivas.' : ''));
   });
@@ -1019,11 +1020,32 @@
      Es la construcción exacta, no una aproximación: para un ángulo
      diedro θ la distancia de tangencia es r·tan(φ/2) con φ el ángulo
      entre las normales salientes. */
-  function edgeCutters(mesh, size, angDeg, round) {
+  /* ¿La arista es saliente (convexa) o entrante (cóncava)?
+     Se mira dónde cae un vértice de la otra cara respecto del plano de la
+     primera: por debajo, la esquina sale hacia fuera y se redondea
+     quitando material; por encima, es un rincón y redondearlo exige
+     añadirlo.  Sin esta distinción, el prisma de recorte de un rincón se
+     construía en el vacío y estropeaba la cadena entera: una pieza en L no
+     se empalmaba en absoluto. */
+  function aristaConvexa(mesh, e, nr) {
+    var n1 = nr[e.f[0]];
+    var f2 = mesh.faces[e.f[1]];
+    var a = mesh.verts[e.a];
+    var mejor = 0;
+    for (var i = 0; i < f2.length; i++) {
+      var k = f2[i];
+      if (k === e.a || k === e.b) continue;
+      var d = G3.dot(n1, G3.sub(mesh.verts[k], a));
+      if (Math.abs(d) > Math.abs(mejor)) mejor = d;
+    }
+    return mejor < 0;
+  }
+
+  function edgeCutters(mesh, size, angDeg, round, informe) {
     var lim = Math.cos((angDeg === undefined ? 60 : angDeg) * Math.PI / 180);
     var ed = mesh.edges();
     var nr = mesh.faces.map(function (f) { return mesh.faceNormal(f); });
-    var out = [];
+    var out = [], concavas = 0;
     for (var i = 0; i < ed.length; i++) {
       var e = ed[i];
       if (e.f.length !== 2) continue;
@@ -1031,18 +1053,22 @@
       var cosF = G3.dot(no1, no2);
       if (cosF > lim) continue;                 /* arista poco marcada */
       if (cosF < -0.999) continue;              /* caras opuestas: sin esquina */
+      var convexa = aristaConvexa(mesh, e, nr);
+      if (!convexa) concavas++;
       var a = mesh.verts[e.a], b = mesh.verts[e.b];
       var t = G3.sub(b, a), L = G3.len(t);
       if (L < 1e-9) continue;
       t = G3.mul(t, 1 / L);
 
-      /* direcciones dentro de cada cara, alejándose de la arista */
+      /* Direcciones dentro de cada cara, alejándose de la arista.
+         En una esquina saliente apuntan hacia el material, que es lo que
+         hay que recortar; en un rincón apuntan hacia el hueco, que es lo
+         que hay que rellenar.  De ahí que el criterio se invierta. */
       var w1 = G3.norm(G3.cross(no1, t));
-      if (G3.dot(w1, no2) > 0) w1 = G3.neg(w1);
+      if ((G3.dot(w1, no2) > 0) === convexa) w1 = G3.neg(w1);
       var w2 = G3.norm(G3.cross(no2, t));
-      if (G3.dot(w2, no1) > 0) w2 = G3.neg(w2);
+      if ((G3.dot(w2, no1) > 0) === convexa) w2 = G3.neg(w2);
 
-      /* sólo se recorta una esquina convexa (material por dentro) */
       var bis = G3.norm(G3.add(no1, no2));
       if (G3.len2(bis) < 1e-12) continue;
 
@@ -1058,7 +1084,9 @@
       if (round) {
         /* centro del arco sobre la bisectriz interior */
         var cDist = size / Math.max(1e-9, Math.sin(phi / 2));
-        var cen = G3.sub(a, G3.mul(bis, cDist));
+        /* el centro del arco cae hacia el material en una esquina y hacia
+           el hueco en un rincón */
+        var cen = convexa ? G3.sub(a, G3.mul(bis, cDist)) : G3.add(a, G3.mul(bis, cDist));
         var u = G3.sub(P1, cen), v = G3.sub(P2, cen);
         var ang = Math.acos(Math.max(-1, Math.min(1, G3.dot(G3.norm(u), G3.norm(v)))));
         var steps = Math.max(3, Math.ceil(ang / 0.20));
@@ -1074,8 +1102,9 @@
       var ov = Math.max(size, dist) * 0.02 + 1e-6;
       var prism = M.extrude(sec.map(function (q) { return G3.sub(q, G3.mul(t, ov)); }),
                             G3.mul(t, L + ov * 2));
-      if (prism && prism.faces.length) out.push({ mesh: prism, a: e.a, b: e.b });
+      if (prism && prism.faces.length) out.push({ mesh: prism, a: e.a, b: e.b, suma: !convexa });
     }
+    if (informe) informe.concavas = concavas;
     return out;
   }
 
@@ -1094,21 +1123,22 @@
     });
     var grupos = {};
     cutters.forEach(function (c) {
-      var k = raiz(c.a);
-      if (!grupos[k]) grupos[k] = [];
-      grupos[k].push(c.mesh);
+      /* las que quitan y las que añaden nunca van en la misma herramienta */
+      var k = (c.suma ? 'S' : 'R') + raiz(c.a);
+      if (!grupos[k]) grupos[k] = { suma: !!c.suma, lista: [] };
+      grupos[k].lista.push(c.mesh);
     });
     var out = [];
     Object.keys(grupos).forEach(function (k) {
-      var g = grupos[k];
-      if (g.length === 1) { out.push(g[0]); return; }
+      var g = grupos[k].lista, suma = grupos[k].suma;
+      if (g.length === 1) { out.push({ mesh: g[0], suma: suma }); return; }
       /* se unen los recortes de la cadena en una sola herramienta */
       var u = g[0];
       for (var i = 1; i < g.length; i++) {
         try { var n2 = CSG.union(u, g[i]); if (n2 && n2.faces.length) u = n2; }
-        catch (e) { out.push(g[i]); }
+        catch (e) { out.push({ mesh: g[i], suma: suma }); }
       }
-      out.push(u);
+      out.push({ mesh: u, suma: suma });
     });
     return out;
   }
@@ -1128,19 +1158,31 @@
     var v0 = Math.abs(mesh.volume());
     var chk0 = CAD.Mesh.check(mesh);
     var exigirCerrada = chk0.estanco;
-    var maxPorRecorte = v0 * 0.25;      /* un empalme nunca se come un cuarto de la pieza */
+    var noManActual = chk0.noManifold;   /* ninguna cadena puede empeorar la topología */
+    var maxPorPaso = v0 * 0.25;         /* un empalme nunca mueve un cuarto de la pieza */
     for (var i = 0; i < cutters.length; i++) {
       var c = cutters[i];
+      var malla = c && c.mesh ? c.mesh : c;          /* admite la forma antigua */
+      var suma = !!(c && c.suma);
       try {
         var vAntes = Math.abs(res.volume());
-        var next = CSG.subtract(res, c);
+        var next = suma ? CSG.union(res, malla) : CSG.subtract(res, malla);
         if (!next || !next.faces.length) { rechazados++; continue; }
         var vDespues = Math.abs(next.volume());
         if (!isFinite(vDespues) || vDespues <= 0) { rechazados++; continue; }
-        if (vDespues > vAntes + 1e-6) { rechazados++; continue; }          /* añadir material: imposible */
-        if (vAntes - vDespues > maxPorRecorte) { rechazados++; continue; } /* se come demasiado */
-        if (exigirCerrada && !CAD.Mesh.check(next).estanco) { rechazados++; continue; }
+        /* quitando material el volumen baja, rellenando un rincón sube:
+           al revés es que la herramienta estaba mal colocada */
+        if (suma) { if (vDespues < vAntes - 1e-6) { rechazados++; continue; } }
+        else if (vDespues > vAntes + 1e-6) { rechazados++; continue; }
+        if (Math.abs(vDespues - vAntes) > maxPorPaso) { rechazados++; continue; }
+        var chkN = CAD.Mesh.check(next);
+        if (exigirCerrada && !chkN.estanco) { rechazados++; continue; }
+        /* Una cadena que deja aristas compartidas por más de dos caras
+           rompe la pieza para exportarla y para seguir trabajándola: vale
+           más dejar esa arista viva que entregar un sólido mal formado. */
+        if (chkN.noManifold > noManActual) { rechazados++; continue; }
         res = next;
+        noManActual = chkN.noManifold;
         done++;
       } catch (err) { rechazados++; continue; }
     }
@@ -1149,14 +1191,27 @@
   }
 
   function filletByEdges(mesh, r, angDeg, informe) {
-    return applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, r, angDeg, true)), informe);
+    var inf0 = {};
+    var res = applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, r, angDeg, true, inf0)), informe);
+    if (informe) informe.concavas = inf0.concavas || 0;
+    return res;
   }
   function chamferByEdges(mesh, d, angDeg, informe) {
-    return applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, d, angDeg, false)), informe);
+    var inf1 = {};
+    var res = applyCutters(mesh, agrupaCadenas(edgeCutters(mesh, d, angDeg, false, inf1)), informe);
+    if (informe) informe.concavas = inf1.concavas || 0;
+    return res;
   }
   /* se exponen para que el árbol de operaciones pueda rehacerlas */
   CAD.CSG.filletMesh = function (mesh, r, ang) { return filletByEdges(mesh, r, ang, null); };
   CAD.CSG.chamferMesh = function (mesh, d, ang) { return chamferByEdges(mesh, d, ang, null); };
+  /* con parte: además del resultado, cuántas cadenas salieron y cuántas no */
+  CAD.CSG.filletMeshInf = function (mesh, r, ang) {
+    var inf = {}; var res = filletByEdges(mesh, r, ang, inf); return { res: res, inf: inf };
+  };
+  CAD.CSG.chamferMeshInf = function (mesh, d, ang) {
+    var inf = {}; var res = chamferByEdges(mesh, d, ang, inf); return { res: res, inf: inf };
+  };
 
   Cmd.add(['CHAFLANARISTA', 'CHAMFEREDGE'], { group: '3d', icon: 'chamferedge', title: 'Achaflanar arista' },
   async function (ctx) {
@@ -1188,6 +1243,7 @@
     if (!done) { ctx.doc.discardTx(); ctx.err('No se ha encontrado ninguna arista que achaflanar.'); return; }
     ctx.app.refresh(true);
     ctx.out(done + ' sólido(s) con aristas achaflanadas ' + G.fmt(d, 3) + '.' +
+            (aviso2 && aviso2.concavas ? '   ' + aviso2.concavas + ' rincón(es) rellenado(s).' : '') +
             (aviso2 && aviso2.rechazados ? '   ' + aviso2.hechos + ' de ' + aviso2.total +
              ' cadenas de aristas; ' + aviso2.rechazados + ' no admiten esa distancia y se han dejado vivas.' : ''));
   });
