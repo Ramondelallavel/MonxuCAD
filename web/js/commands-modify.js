@@ -712,8 +712,11 @@
      ============================================================ */
   Cmd.add(['EMPALME', 'FILLET', 'F', 'MB'], { group: 'modify', icon: 'fillet', title: 'Empalme' }, async function (ctx) {
     var r = ctx.app.filletR === undefined ? 10 : ctx.app.filletR;
+    if (ctx.app.filletTrim === undefined) ctx.app.filletTrim = true;
+    var varios = false;
     while (true) {
-      ctx.out('Parámetros actuales: Modo = RECORTAR, Radio del empalme = ' + G.fmt(r, 4));
+      ctx.out('Parámetros actuales: Modo = ' + (ctx.app.filletTrim ? 'RECORTAR' : 'NO RECORTAR') +
+              ', Radio del empalme = ' + G.fmt(r, 4));
       var e1 = await ctx.getEntity('Designe el primer objeto o', { keywords: ['desHacer', 'Polilínea', 'RAdio', 'Recortar', 'Múltiple'], allowNone: true });
       if (!e1) return;
       if (isKw(e1)) {
@@ -730,19 +733,44 @@
           ctx.out(n + ' línea(s) empalmada(s).');
           ctx.app.refresh();
           return;
+        } else if (e1.kw === 'R') {
+          /* modo de recorte: con NO RECORTAR se añade el arco y las
+             rectas se quedan como estaban, igual que en AutoCAD */
+          var md = await ctx.getKeyword('Indique modo de recorte de empalme', ['Recortar', 'No recortar'],
+                                        { def: ctx.app.filletTrim ? 'Recortar' : 'No recortar' });
+          if (md) {
+            ctx.app.filletTrim = (md.kw === 'R');
+            ctx.out('Modo de recorte: ' + (ctx.app.filletTrim ? 'RECORTAR' : 'NO RECORTAR'));
+          }
+        } else if (e1.kw === 'M') {
+          varios = true;
+          ctx.out('Modo múltiple: el comando sigue activo hasta pulsar Intro o Esc.');
+        } else if (e1.kw === 'H') {
+          var et = ctx.doc.undo();
+          ctx.out(et ? ('Deshecho: ' + et) : 'Nada que deshacer', et ? '' : 'warn');
+          ctx.app.refresh(true);
         }
         continue;
       }
       var e2 = await ctx.getEntity('Designe el segundo objeto o mantenga pulsada Mayús para aplicar una esquina');
-      if (!e2) return;
+      if (!e2) { if (varios) continue; return; }
       ctx.doc.mark('EMPALME');
-      if (!doFillet(ctx, e1, e2, r)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.discardTx(); }
+      if (!doFillet(ctx, e1, e2, r, ctx.app.filletTrim)) { ctx.err('No se puede empalmar estos objetos.'); ctx.doc.discardTx(); }
       ctx.app.refresh();
-      return;
+      if (!varios) return;
     }
   });
 
-  function doFillet(ctx, e1, e2, r) {
+  /* La abreviatura de una opción llega con sus acentos ("ÁN" de ÁNgulo):
+     se comparan sin ellos para no tener que escribirlos en el código. */
+  function kwPlano(k) {
+    return String(k || '').toUpperCase()
+      .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+      .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N');
+  }
+
+  function doFillet(ctx, e1, e2, r, recorta) {
+    if (recorta === undefined) recorta = true;
     var doc = ctx.doc;
     var A = e1.ent, B = e2.ent;
     var pa = PR.of(A, doc), pb = PR.of(B, doc);
@@ -769,8 +797,10 @@
     var a0 = G.ang(c, t1), a1 = G.ang(c, t2);
     var sw = G.sweep(a0, a1);
     var arcEnt = sw <= Math.PI ? E.arc(c, r, a0, a1, { layer: doc.vars.CLAYER }) : E.arc(c, r, a1, a0, { layer: doc.vars.CLAYER });
-    trimTo(ctx, A, prA, t1, e1.p);
-    trimTo(ctx, B, prB, t2, e2.p);
+    if (recorta) {
+      trimTo(ctx, A, prA, t1, e1.p);
+      trimTo(ctx, B, prB, t2, e2.p);
+    }
     doc.add(arcEnt);
     return true;
   }
@@ -851,9 +881,16 @@
   Cmd.add(['CHAFLAN', 'CHAMFER', 'CHA'], { group: 'modify', icon: 'chamfer', title: 'Chaflán' }, async function (ctx) {
     var d1 = ctx.app.chamD1 === undefined ? 5 : ctx.app.chamD1;
     var d2 = ctx.app.chamD2 === undefined ? 5 : ctx.app.chamD2;
+    if (ctx.app.chamTrim === undefined) ctx.app.chamTrim = true;
+    if (ctx.app.chamMetodo === undefined) ctx.app.chamMetodo = 'D';   /* D = distancias, A = ángulo */
+    var varios = false;
     while (true) {
-      ctx.out('(Modo RECORTAR) Distancia base actual1 = ' + G.fmt(d1, 4) + ', Dist2 = ' + G.fmt(d2, 4));
-      var e1 = await ctx.getEntity('Designe la primera línea o', { keywords: ['desHacer', 'Polilínea', 'Distancia', 'Ángulo', 'Recortar', 'Método', 'Múltiple'], allowNone: true });
+      ctx.out('(Modo ' + (ctx.app.chamTrim ? 'RECORTAR' : 'NO RECORTAR') + ') ' +
+              (ctx.app.chamMetodo === 'A'
+                ? ('Longitud = ' + G.fmt(ctx.app.chamLong === undefined ? d1 : ctx.app.chamLong, 4) +
+                   ', Ángulo = ' + G.fmt(ctx.app.chamAng === undefined ? 45 : ctx.app.chamAng, 4) + '°')
+                : ('Distancia base actual1 = ' + G.fmt(d1, 4) + ', Dist2 = ' + G.fmt(d2, 4))));
+      var e1 = await ctx.getEntity('Designe la primera línea o', { keywords: ['desHacer', 'Polilínea', 'Distancia', 'ÁNgulo', 'Recortar', 'mÉtodo', 'Múltiple'], allowNone: true });
       if (!e1) return;
       if (isKw(e1)) {
         if (e1.kw === 'D') {
@@ -861,7 +898,39 @@
           var b = await ctx.getReal('Precise segunda distancia de chaflán', { def: G.fmt(typeof a === 'number' ? a : d2, 4) });
           if (typeof a === 'number') d1 = a;
           if (typeof b === 'number') d2 = b;
-          ctx.app.chamD1 = d1; ctx.app.chamD2 = d2;
+          ctx.app.chamD1 = d1; ctx.app.chamD2 = d2; ctx.app.chamMetodo = 'D';
+        } else if (kwPlano(e1.kw) === 'AN') {
+          /* chaflán por longitud y ángulo, como el método ÁNgulo de AutoCAD */
+          var lo = await ctx.getReal('Precise longitud de chaflán desde la primera línea',
+                                     { def: G.fmt(ctx.app.chamLong === undefined ? d1 : ctx.app.chamLong, 4) });
+          if (typeof lo !== 'number') continue;
+          var an = await ctx.getReal('Precise ángulo de chaflán desde la primera línea',
+                                     { def: G.fmt(ctx.app.chamAng === undefined ? 45 : ctx.app.chamAng, 4) });
+          if (typeof an !== 'number') continue;
+          an = ((an % 180) + 180) % 180;
+          if (an < 1e-6 || Math.abs(an - 90) < 1e-6) { ctx.err('El ángulo debe estar entre 0 y 90 grados, sin incluirlos.'); continue; }
+          ctx.app.chamLong = Math.abs(lo); ctx.app.chamAng = an; ctx.app.chamMetodo = 'A';
+        } else if (kwPlano(e1.kw) === 'E') {
+          var me = await ctx.getKeyword('Indique método de recorte', ['Distancia', 'ÁNgulo'],
+                                        { def: ctx.app.chamMetodo === 'A' ? 'ÁNgulo' : 'Distancia' });
+          if (me) {
+            ctx.app.chamMetodo = kwPlano(me.kw) === 'AN' ? 'A' : 'D';
+            ctx.out('Método: ' + (ctx.app.chamMetodo === 'A' ? 'ÁNGULO' : 'DISTANCIA'));
+          }
+        } else if (e1.kw === 'R') {
+          var md = await ctx.getKeyword('Indique modo de recorte de chaflán', ['Recortar', 'No recortar'],
+                                        { def: ctx.app.chamTrim ? 'Recortar' : 'No recortar' });
+          if (md) {
+            ctx.app.chamTrim = (md.kw === 'R');
+            ctx.out('Modo de recorte: ' + (ctx.app.chamTrim ? 'RECORTAR' : 'NO RECORTAR'));
+          }
+        } else if (e1.kw === 'M') {
+          varios = true;
+          ctx.out('Modo múltiple: el comando sigue activo hasta pulsar Intro o Esc.');
+        } else if (e1.kw === 'H') {
+          var et = ctx.doc.undo();
+          ctx.out(et ? ('Deshecho: ' + et) : 'Nada que deshacer', et ? '' : 'warn');
+          ctx.app.refresh(true);
         } else if (e1.kw === 'P') {
           var pc = await ctx.getEntity('Designe una polilínea 2D', {
             filter: function (x) { return x.type === 'LWPOLYLINE'; }
@@ -876,21 +945,37 @@
         continue;
       }
       var e2 = await ctx.getEntity('Designe la segunda línea');
-      if (!e2) return;
-      if (e1.ent.type !== 'LINE' || e2.ent.type !== 'LINE') { ctx.err('El chaflán requiere dos líneas.'); return; }
+      if (!e2) { if (varios) continue; return; }
+      if (e1.ent.type !== 'LINE' || e2.ent.type !== 'LINE') {
+        ctx.err('El chaflán requiere dos líneas.');
+        if (varios) continue;
+        return;
+      }
       ctx.doc.mark('CHAFLAN');
       var A = e1.ent, B = e2.ent;
       var ints = G.interLine(A.p1, A.p2, B.p1, B.p2, true, true);
-      if (!ints.length) { ctx.err('Las líneas son paralelas.'); ctx.doc.discardTx(); return; }
+      if (!ints.length) {
+        ctx.err('Las líneas son paralelas.'); ctx.doc.discardTx();
+        if (varios) continue;
+        return;
+      }
       var corner = ints[0];
       var dirA = G.ang(corner, G.dist(A.p1, corner) > G.dist(A.p2, corner) ? A.p1 : A.p2);
       var dirB = G.ang(corner, G.dist(B.p1, corner) > G.dist(B.p2, corner) ? B.p1 : B.p2);
-      var q1 = G.polar(corner, dirA, d1), q2 = G.polar(corner, dirB, d2);
-      trimTo(ctx, A, null, q1, e1.p);
-      trimTo(ctx, B, null, q2, e2.p);
+      var u1 = d1, u2 = d2;
+      if (ctx.app.chamMetodo === 'A') {
+        /* la segunda distancia sale del ángulo pedido sobre la primera línea */
+        u1 = ctx.app.chamLong === undefined ? d1 : ctx.app.chamLong;
+        u2 = u1 * Math.tan((ctx.app.chamAng === undefined ? 45 : ctx.app.chamAng) * Math.PI / 180);
+      }
+      var q1 = G.polar(corner, dirA, u1), q2 = G.polar(corner, dirB, u2);
+      if (ctx.app.chamTrim) {
+        trimTo(ctx, A, null, q1, e1.p);
+        trimTo(ctx, B, null, q2, e2.p);
+      }
       ctx.doc.add(E.line(q1, q2, { layer: ctx.doc.vars.CLAYER }));
       ctx.app.refresh();
-      return;
+      if (!varios) return;
     }
   });
 
