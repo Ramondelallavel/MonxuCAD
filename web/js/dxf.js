@@ -516,7 +516,9 @@
         ? { x: 2 * cen.x - ent.p1.x, y: 2 * cen.y - ent.p1.y } : cen; break;
       case 'angular': case 'arclen': defPt = ent.p3 || cen; break;
       case 'ordinate': defPt = ent.p1 || { x: 0, y: 0 }; break;
-      default: defPt = ent.dimLine || ent.textPos || ent.p2 || ent.p1 || { x: 0, y: 0 };
+      /* en una lineal o alineada, el 10 es el punto por el que pasa la
+         línea de cota, que en el modelo es p3 */
+      default: defPt = ent.p3 || ent.textPos || ent.p2 || ent.p1 || { x: 0, y: 0 };
     }
     W.pt(10, defPt);
     var tp = ent.textPos || (geo.texts[0] && geo.texts[0].p) || defPt;
@@ -1373,10 +1375,10 @@
         switch (kind) {
           case 'linear': case 'rotated':
             dm.p1 = d13; dm.p2 = d14; dm.rot = G.rad(get(codes, 50, 0));
-            dm.dimLine = tiene(10) ? d10 : d11;
+            dm.p3 = tiene(10) ? d10 : d11;
             break;
           case 'aligned':
-            dm.p1 = d13; dm.p2 = d14; dm.dimLine = tiene(10) ? d10 : d11;
+            dm.p1 = d13; dm.p2 = d14; dm.p3 = tiene(10) ? d10 : d11;
             break;
           case 'radius':
             dm.center = d10; dm.p1 = tiene(15) ? d15 : d10;
