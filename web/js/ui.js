@@ -2114,7 +2114,7 @@
       '</div>' +
       '<fieldset><legend>Previsualización</legend><canvas id="plPrev" width="420" height="300" style="width:100%;background:#fff;border:1px solid var(--edge-soft)"></canvas></fieldset>';
     return this.dialog({
-      title: 'Trazar — Modelo', width: 520, body: body,
+      title: 'Trazar — ' + (app.paperMode && app.layout ? app.layout.name : 'Modelo'), width: 520, body: body,
       buttons: [{ label: 'Trazar', value: 'plot', primary: true }, { label: 'Cancelar', value: null }],
       onOpen: function (b) {
         function preview() {
@@ -2140,7 +2140,7 @@
           ctx.rect(ox, oy, pw * s, ph * s);
           ctx.clip();
           ctx.lineWidth = 0.7;
-          CAD.Exporter.collect(doc, { mono: true }).forEach(function (it) {
+          CAD.Exporter.hoja(app, { mono: true }).items.forEach(function (it) {
             if (it.kind === 'path' || it.kind === 'fill') {
               ctx.strokeStyle = '#333';
               ctx.beginPath();
@@ -2162,6 +2162,8 @@
           else if (area === 'Pantalla') {
             var a = app.r.s2w({ x: 0, y: app.r.H }), c = app.r.s2w({ x: app.r.W, y: 0 });
             box = { x1: a.x, y1: a.y, x2: c.x, y2: c.y };
+          } else if (app.paperMode && app.layout) {
+            box = { x1: 0, y1: 0, x2: app.layout.w, y2: app.layout.h };
           } else {
             box = E.extentsAll(doc.entities, doc);
             if (!G.bboxValid(box)) box = { x1: 0, y1: 0, x2: 100, y2: 100 };
@@ -2188,11 +2190,13 @@
           var blob = await CAD.Exporter.pngBlob(app);
           await CAD.Exporter.saveFile(app, base + '.png', blob, 'png');
         } else if (cfg.dev.indexOf('SVG') === 0) {
-          var svg = CAD.Exporter.toSVG(doc, { box: cfg.box, mono: cfg.mono });
-          await CAD.Exporter.saveFile(app, base + '.svg', svg, 'svg');
+          var oS = CAD.Exporter.paraExportar(app, { box: cfg.box, mono: cfg.mono });
+          oS.box = cfg.box;
+          await CAD.Exporter.saveFile(app, base + '.svg', CAD.Exporter.toSVG(doc, oS), 'svg');
         } else {
-          var pdf = CAD.Exporter.toPDF(doc, cfg);
-          await CAD.Exporter.saveFile(app, base + '.pdf', pdf, 'pdf');
+          var oP = CAD.Exporter.paraExportar(app, cfg);
+          oP.box = cfg.box;
+          await CAD.Exporter.saveFile(app, base + '.pdf', CAD.Exporter.toPDF(doc, oP), 'pdf');
         }
         return true;
       }

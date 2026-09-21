@@ -1241,11 +1241,18 @@
         if (fmt === 'dxf2000') await CAD.Exporter.saveFile(self, name + '.dxf', CAD.DXF.write(doc, { version: 'AC1015' }), 'dxf');
         else if (fmt === 'dxfr12') await CAD.Exporter.saveFile(self, name + '.dxf', CAD.DXF.write(doc, { version: 'AC1009' }), 'dxf');
         else if (fmt === 'dcad') await CAD.Exporter.saveFile(self, name + '.dcad', self.docToJSON(), 'json');
-        else if (fmt === 'svg') await CAD.Exporter.saveFile(self, name + '.svg', CAD.Exporter.toSVG(doc, {}), 'svg');
         else if (fmt === 'png') await CAD.Exporter.saveFile(self, name + '.png', await CAD.Exporter.pngBlob(self), 'png');
-        else {
-          var bb = E.extentsAll(doc.entities, doc);
-          await CAD.Exporter.saveFile(self, name + '.pdf', CAD.Exporter.toPDF(doc, { box: bb, paper: { w: 420, h: 297 }, mono: true }), 'pdf');
+        else if (fmt === 'svg') {
+          /* desde una presentación se exporta la hoja, no el espacio vacío */
+          await CAD.Exporter.saveFile(self, name + '.svg',
+            CAD.Exporter.toSVG(doc, CAD.Exporter.paraExportar(self, {})), 'svg');
+        } else {
+          var o = CAD.Exporter.paraExportar(self, { mono: true });
+          if (!o.box) o.box = E.extentsAll(doc.entities, doc);
+          o.paper = self.paperMode && self.layout
+            ? { w: self.layout.w, h: self.layout.h } : { w: 420, h: 297 };
+          if (self.paperMode) { o.scale = 1; o.margin = 0; }
+          await CAD.Exporter.saveFile(self, name + '.pdf', CAD.Exporter.toPDF(doc, o), 'pdf');
         }
         return true;
       }

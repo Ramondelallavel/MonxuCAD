@@ -104,6 +104,123 @@
   X.collect = collect;
 
   /* ------------------------------------------------------------
+     La hoja de una presentación
+     Trazar o exportar desde una presentación daba un archivo vacío: se
+     recogía el espacio activo, y en el papel lo único que hay son las
+     anotaciones de la hoja; lo que se ve por las ventanas gráficas vive
+     en el modelo.  Aquí se arma la hoja entera: lo dibujado en el papel
+     más el modelo visto por cada ventana, ya en coordenadas de papel y
+     recortado a su marco.
+     ------------------------------------------------------------ */
+  function dentro(p, r) { return p.x >= r.x1 - 1e-9 && p.x <= r.x2 + 1e-9 && p.y >= r.y1 - 1e-9 && p.y <= r.y2 + 1e-9; }
+
+  /* Recorta un segmento contra el rectángulo (Liang–Barsky) */
+  function corta(a, b, r) {
+    var t0 = 0, t1 = 1, dx = b.x - a.x, dy = b.y - a.y;
+    var pq = [[-dx, a.x - r.x1], [dx, r.x2 - a.x], [-dy, a.y - r.y1], [dy, r.y2 - a.y]];
+    for (var i = 0; i < 4; i++) {
+      var pp = pq[i][0], qq = pq[i][1];
+      if (Math.abs(pp) < 1e-12) { if (qq < 0) return null; continue; }
+      var t = qq / pp;
+      if (pp < 0) { if (t > t1) return null; if (t > t0) t0 = t; }
+      else { if (t < t0) return null; if (t < t1) t1 = t; }
+    }
+    return [{ x: a.x + t0 * dx, y: a.y + t0 * dy }, { x: a.x + t1 * dx, y: a.y + t1 * dy }];
+  }
+
+  /* Trozos de una polilínea que caen dentro del rectángulo */
+  function recortaPoli(pts, r) {
+    var out = [], cur = null;
+    for (var i = 0; i + 1 < pts.length; i++) {
+      var sg = corta(pts[i], pts[i + 1], r);
+      if (!sg) { if (cur) { out.push(cur); cur = null; } continue; }
+      if (!cur) cur = [sg[0], sg[1]];
+      else {
+        var ul = cur[cur.length - 1];
+        if (Math.abs(ul.x - sg[0].x) > 1e-9 || Math.abs(ul.y - sg[0].y) > 1e-9) { out.push(cur); cur = [sg[0], sg[1]]; }
+        else cur.push(sg[1]);
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  /* Recorta un contorno cerrado (Sutherland–Hodgman) */
+  function recortaLazo(pts, r) {
+    var bordes = [
+      function (p) { return p.x >= r.x1; }, function (p) { return p.x <= r.x2; },
+      function (p) { return p.y >= r.y1; }, function (p) { return p.y <= r.y2; }
+    ];
+    var inter = [
+      function (a, b) { var t = (r.x1 - a.x) / (b.x - a.x); return { x: r.x1, y: a.y + t * (b.y - a.y) }; },
+      function (a, b) { var t = (r.x2 - a.x) / (b.x - a.x); return { x: r.x2, y: a.y + t * (b.y - a.y) }; },
+      function (a, b) { var t = (r.y1 - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: r.y1 }; },
+      function (a, b) { var t = (r.y2 - a.y) / (b.y - a.y); return { x: a.x + t * (b.x - a.x), y: r.y2 }; }
+    ];
+    var res = pts.slice();
+    for (var k = 0; k < 4 && res.length; k++) {
+      var ent2 = res; res = [];
+      for (var i = 0; i < ent2.length; i++) {
+        var A = ent2[i], B = ent2[(i + 1) % ent2.length];
+        var dA = bordes[k](A), dB = bordes[k](B);
+        if (dA) res.push(A);
+        if (dA !== dB) res.push(inter[k](A, B));
+      }
+    }
+    return res.length >= 3 ? res : null;
+  }
+
+  X.hoja = function (app, opts) {
+    opts = opts || {};
+    var doc = app.doc;
+    if (!app.paperMode || !app.layout) return { items: collect(doc, opts), box: opts.box || null };
+    var lay = app.layout;
+    var items = collect(doc, Object.assign({}, opts, { entities: doc.visible() }));
+    var modelo = doc.entities.filter(function (e) {
+      var l = doc.layer(e.layer);
+      return l.on && !l.frozen && !e.hidden;
+    });
+    (lay.viewports || []).forEach(function (vp) {
+      if (vp.on === false) return;
+      var sc = vp.scale || 1;
+      var cx = vp.x + vp.w / 2, cy = vp.y + vp.h / 2;
+      var r = { x1: vp.x, y1: vp.y, x2: vp.x + vp.w, y2: vp.y + vp.h };
+      var T = function (p) { return { x: cx + (p.x - vp.cx) * sc, y: cy + (p.y - vp.cy) * sc }; };
+      var vistos = modelo.filter(function (e) { return (vp.frozen || []).indexOf(e.layer) < 0; });
+      collect(doc, Object.assign({}, opts, { entities: vistos })).forEach(function (it) {
+        if (it.kind === 'path') {
+          recortaPoli(it.pts.map(T), r).forEach(function (tr) {
+            items.push({ kind: 'path', pts: tr, rgb: it.rgb, w: it.w, dash: it.dash });
+          });
+        } else if (it.kind === 'fill') {
+          var lz = recortaLazo(it.pts.map(T), r);
+          if (lz) items.push({ kind: 'fill', pts: lz, rgb: it.rgb });
+        } else if (it.kind === 'fillLoops') {
+          var loops = [];
+          it.loops.forEach(function (l) { var q = recortaLazo(l.map(T), r); if (q) loops.push(q); });
+          if (loops.length) items.push(Object.assign({}, it, { loops: loops, scale: (it.scale || 1) * sc }));
+        } else if (it.kind === 'text') {
+          var q2 = T(it.p);
+          if (dentro(q2, r)) items.push(Object.assign({}, it, { p: q2, h: it.h * sc }));
+        } else if (it.kind === 'point') {
+          var q3 = T(it.p);
+          if (dentro(q3, r)) items.push(Object.assign({}, it, { p: q3 }));
+        }
+      });
+    });
+    return { items: items, box: { x1: 0, y1: 0, x2: lay.w, y2: lay.h } };
+  };
+
+  /* Lo que toca exportar ahora mismo, esté uno donde esté */
+  X.paraExportar = function (app, opts) {
+    var h = X.hoja(app, opts);
+    var o = Object.assign({}, opts, { items: h.items });
+    if (h.box) o.box = h.box;
+    return o;
+  };
+
+
+  /* ------------------------------------------------------------
      SVG
      ------------------------------------------------------------ */
   X.toSVG = function (doc, opts) {
@@ -119,7 +236,7 @@
     out.push('<rect width="100%" height="100%" fill="#ffffff"/>');
     out.push('<g transform="translate(' + fmt(-b.x1) + ',' + fmt(b.y2) + ') scale(1,-1)">');
     function col(rgb) { return 'rgb(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ')'; }
-    collect(doc, opts).forEach(function (it) {
+    (opts.items || collect(doc, opts)).forEach(function (it) {
       if (it.kind === 'path') {
         var d = it.pts.map(function (p, i) { return (i ? 'L' : 'M') + fmt(p.x) + ' ' + fmt(p.y); }).join(' ');
         out.push('<path d="' + d + '" fill="none" stroke="' + col(it.rgb) + '" stroke-width="' + fmt(it.w || 0.25) +
@@ -193,7 +310,7 @@
     }
     function setFill(rgb) { c.push(f3(rgb[0] / 255) + ' ' + f3(rgb[1] / 255) + ' ' + f3(rgb[2] / 255) + ' rg'); }
 
-    collect(doc, opts).forEach(function (it) {
+    (opts.items || collect(doc, opts)).forEach(function (it) {
       if (it.kind === 'path') {
         setStroke(it.rgb, it.w, it.dash);
         it.pts.forEach(function (p, i) { c.push(f3(TX(p.x)) + ' ' + f3(TY(p.y)) + ' ' + (i ? 'l' : 'm')); });
