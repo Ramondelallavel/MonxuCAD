@@ -418,9 +418,17 @@
       case 'ELLIPSE': return offsetEllipse(ent, d, side, base, through);
       case 'LWPOLYLINE': return offsetPline(ent, d, side, base, through);
       case 'SPLINE': {
-        var pts = E.splinePts(ent);
-        var offp = offsetPolyPts(pts, d, side, ent.closed);
+        /* se muestrea fino para que la normal de cada punto sea la de la
+           curva y no la de la cuerda, y luego se aligera: quedan puntos
+           donde la curva gira y pocos donde va derecha */
+        var pts = E.splinePts(ent, 64);
+        var offp = offsetSuave(pts, d, side, ent.closed);
         if (!offp) return null;
+        var lim = Math.abs(d) * 1e-4 + 1e-9;
+        if (offp.length > 8) {
+          var red = G.simplify(offp, lim);
+          if (red.length >= 4) offp = red;
+        }
         return E.spline(offp, ent.closed, base);
       }
       default: return null;
@@ -518,15 +526,96 @@
       lines.push([G.add(a, G.mul(nn, s * d)), G.add(b, G.mul(nn, s * d))]);
     }
     if (!lines.length) return null;
-    var out = [];
-    if (!closed) out.push(lines[0][0]);
-    for (var k = 0; k < lines.length - (closed ? 0 : 1); k++) {
-      var L1 = lines[k], L2 = lines[(k + 1) % lines.length];
-      var ii = G.interLine(L1[0], L1[1], L2[0], L2[1], true, true);
-      out.push(ii.length ? { x: ii[0].x, y: ii[0].y } : L1[1]);
+    var nl = lines.length, out = [], k, L1, L2, ii;
+    if (closed) {
+      /* el vértice k de la polilínea desfasada es el pico entre el tramo
+         anterior y el suyo, para que se corresponda con el vértice k de
+         la original: si no, la polilínea sale girada un vértice y las
+         ediciones por índice dejan de cuadrar */
+      for (k = 0; k < nl; k++) {
+        L1 = lines[(k - 1 + nl) % nl]; L2 = lines[k];
+        ii = G.interLine(L1[0], L1[1], L2[0], L2[1], true, true);
+        out.push(ii.length ? { x: ii[0].x, y: ii[0].y } : { x: L2[0].x, y: L2[0].y });
+      }
+      return out;
     }
-    if (!closed) out.push(lines[lines.length - 1][1]);
+    out.push(lines[0][0]);
+    for (k = 0; k < nl - 1; k++) {
+      L1 = lines[k]; L2 = lines[k + 1];
+      ii = G.interLine(L1[0], L1[1], L2[0], L2[1], true, true);
+      out.push(ii.length ? { x: ii[0].x, y: ii[0].y } : { x: L1[1].x, y: L1[1].y });
+    }
+    out.push(lines[nl - 1][1]);
     return out;
+  }
+
+  /* Desfase de una curva suave.
+
+     Con la polilínea que la aproxima no sirve el inglete de cada
+     vértice: la recta desfasada se cruza con la siguiente más lejos de
+     la distancia pedida, y con muchos tramos cortos ese error se nota.
+     Como la curva no tiene esquinas, basta correr cada punto por su
+     normal, que sí es exacta. */
+  function offsetSuave(pts, d, side, closed) {
+    var n = pts.length;
+    if (n < 2) return null;
+    var s = sideSign(pts, side, closed), out = [];
+    for (var i = 0; i < n; i++) {
+      var a = pts[i === 0 ? (closed ? n - 1 : 0) : i - 1];
+      var b = pts[i === n - 1 ? (closed ? 0 : n - 1) : i + 1];
+      var t = G.sub(b, a);
+      if (G.len(t) < 1e-12) continue;
+      t = G.norm(t);
+      out.push(G.add(pts[i], G.mul({ x: -t.y, y: t.x }, s * d)));
+    }
+    return out.length >= 2 ? out : null;
+  }
+
+  /* Desfase de un tramo suelto: la recta se corre por su perpendicular y
+     el arco cambia de radio sin mover el centro. */
+  function correPrim(pr, s, d) {
+    if (pr.t === 'seg') {
+      var dir = G.norm(G.sub(pr.b, pr.a)), nn = { x: -dir.y, y: dir.x };
+      return { t: 'seg', a: G.add(pr.a, G.mul(nn, s * d)), b: G.add(pr.b, G.mul(nn, s * d)) };
+    }
+    var outw = pr.ccw ? -s : s;
+    var r = pr.r + outw * d;
+    if (r <= 1e-9) r = 1e-9;
+    return { t: 'arc', c: pr.c, r: r, a0: pr.a0, a1: pr.a1, ccw: pr.ccw, full: pr.full };
+  }
+  function iniPrim(pr) { return pr.t === 'seg' ? G.clone(pr.a) : G.polar(pr.c, pr.a0, pr.r); }
+  function finPrim(pr) { return pr.t === 'seg' ? G.clone(pr.b) : G.polar(pr.c, pr.a1, pr.r); }
+  function ponIni(pr, q) { if (pr.t === 'seg') pr.a = { x: q.x, y: q.y }; else pr.a0 = G.ang(pr.c, q); }
+  function ponFin(pr, q) { if (pr.t === 'seg') pr.b = { x: q.x, y: q.y }; else pr.a1 = G.ang(pr.c, q); }
+  function bulgePrim(pr) { return pr.t === 'seg' ? 0 : Math.tan((primSweep(pr) * (pr.ccw ? 1 : -1)) / 4); }
+  function infPrim(pr) {
+    return pr.t === 'seg' ? { t: 'seg', a: pr.a, b: pr.b, inf1: true, inf2: true }
+                          : { t: 'cir', c: pr.c, r: pr.r };
+  }
+
+  /* Empalma dos tramos desfasados en su esquina.
+
+     Cada tramo se corre por su cuenta, así que en una esquina que no sea
+     tangente el final de uno y el principio del siguiente dejan de
+     coincidir.  Hay que prolongarlos —o recortarlos— hasta donde se
+     cruzan, que es lo que hace AutoCAD: las esquinas de una polilínea
+     desfasada salen en pico, no redondeadas.
+
+     Antes se encadenaban sin más y el arco siguiente se veía obligado a
+     terminar donde empezaba el otro: cambiaba de radio y de centro. */
+  function juntaPrims(p1, p2) {
+    var e1 = finPrim(p1), i2 = iniPrim(p2);
+    var tol = (Math.abs(p1.r || 0) + Math.abs(p2.r || 0) + 1) * 1e-12 + 1e-12;
+    if (G.dist(e1, i2) <= tol) return true;        /* tangente: ya casan */
+    var cand = PR.inter(infPrim(p1), infPrim(p2), true);
+    if (!cand.length) return false;
+    var ref = G.mid(e1, i2), q = cand[0], dm = G.dist(cand[0], ref);
+    for (var i = 1; i < cand.length; i++) {
+      var dd = G.dist(cand[i], ref);
+      if (dd < dm) { dm = dd; q = cand[i]; }
+    }
+    ponFin(p1, q); ponIni(p2, q);
+    return true;
   }
 
   function offsetPline(ent, d, side, base, through) {
@@ -534,31 +623,30 @@
     var hasBulge = ent.verts.some(function (v) { return !!v.b; });
     if (hasBulge) {
       var path = pathOf(ent);
+      if (!path || !path.prims.length) return null;
       var s = sideSign(E.plinePts(ent, 1), side, ent.closed);
-      var verts = [];
-      path.prims.forEach(function (pr, i) {
-        if (pr.t === 'seg') {
-          var dir = G.norm(G.sub(pr.b, pr.a)), nn = { x: -dir.y, y: dir.x };
-          verts.push({ p: G.add(pr.a, G.mul(nn, s * d)), b: 0, q: G.add(pr.b, G.mul(nn, s * d)) });
-        } else {
-          var outw = pr.ccw ? -s : s;
-          var r = pr.r + outw * d;
-          if (r <= 1e-9) r = 1e-9;
-          verts.push({
-            p: G.polar(pr.c, pr.a0, r), q: G.polar(pr.c, pr.a1, r),
-            b: Math.tan((primSweep(pr) * (pr.ccw ? 1 : -1)) / 4)
-          });
-        }
-      });
+      var off = path.prims.map(function (pr) { return correPrim(pr, s, d); });
+      var n = off.length, i;
+      var ultimo = ent.closed ? n : n - 1;
+      for (i = 0; i < ultimo; i++) juntaPrims(off[i], off[(i + 1) % n]);
       var res = [];
-      verts.forEach(function (v, i) { res.push({ x: v.p.x, y: v.p.y, b: v.b }); });
-      var lastv = verts[verts.length - 1];
-      if (!ent.closed) res.push({ x: lastv.q.x, y: lastv.q.y, b: 0 });
+      for (i = 0; i < n; i++) {
+        var p0 = iniPrim(off[i]);
+        res.push({ x: p0.x, y: p0.y, b: bulgePrim(off[i]) });
+        var sig = (i + 1 < n) ? off[i + 1] : (ent.closed ? off[0] : null);
+        if (!sig) continue;
+        /* si no hubo forma de cruzarlos, se cierra el hueco con un tramo
+           recto: mejor una esquina achaflanada que un arco deformado */
+        var e1 = finPrim(off[i]), i2 = iniPrim(sig);
+        if (G.dist(e1, i2) > 1e-9) res.push({ x: e1.x, y: e1.y, b: 0 });
+      }
+      if (!ent.closed) { var f = finPrim(off[n - 1]); res.push({ x: f.x, y: f.y, b: 0 }); }
+      if (res.length < 2) return null;
       return E.pline(res, ent.closed, base);
     }
-    var off = offsetPolyPts(pts, d, side, ent.closed);
-    if (!off) return null;
-    return E.pline(off, ent.closed, base);
+    var off2 = offsetPolyPts(pts, d, side, ent.closed);
+    if (!off2) return null;
+    return E.pline(off2, ent.closed, base);
   }
 
   /* ============================================================

@@ -666,15 +666,110 @@
     return out;
   };
 
-  /* Spline por Catmull-Rom sobre puntos de ajuste */
-  E.splinePts = function (ent) {
+  /* ------------------------------------------------------------
+     B-splines racionales (NURBS)
+
+     Una SPLINE de DXF viene definida por puntos de CONTROL y un vector
+     de nudos, y la curva NO pasa por esos puntos: la empujan desde
+     fuera.  Los puntos de ajuste (grupo 11) son opcionales e indican por
+     dónde pasó quien la dibujó, no la curva.
+
+     Antes se metían los puntos de control en `fit` y se dibujaba una
+     Catmull-Rom que los interpolaba.  Cualquier spline importada salía
+     deformada —una Bézier cúbica de 100×100 se iba 42 unidades de su
+     sitio— y un círculo guardado como NURBS racional salía con 41
+     unidades de error de radio.  Aquí se evalúa de verdad, con De Boor,
+     y con pesos si los trae.
+     ------------------------------------------------------------ */
+  function nudosSujetos(n, d) {
+    var U = [], i, m = n - d;
+    for (i = 0; i <= d; i++) U.push(0);
+    for (i = 1; i < m; i++) U.push(i / m);
+    for (i = 0; i <= d; i++) U.push(1);
+    return U;
+  }
+
+  function deBoor(P, W, U, d, u) {
+    var n = P.length, k = d, j, r;
+    while (k < n - 1 && u >= U[k + 1]) k++;
+    var px = [], py = [], pw = [];
+    for (j = 0; j <= d; j++) {
+      var idx = k - d + j;
+      var w = W ? W[idx] : 1;
+      px.push(P[idx].x * w); py.push(P[idx].y * w); pw.push(w);
+    }
+    for (r = 1; r <= d; r++) {
+      for (j = d; j >= r; j--) {
+        var i2 = k - d + j;
+        var den = U[i2 + d - r + 1] - U[i2];
+        var al = den > 1e-12 ? (u - U[i2]) / den : 0;
+        px[j] = (1 - al) * px[j - 1] + al * px[j];
+        py[j] = (1 - al) * py[j - 1] + al * py[j];
+        pw[j] = (1 - al) * pw[j - 1] + al * pw[j];
+      }
+    }
+    var ww = pw[d] || 1;
+    return { x: px[d] / ww, y: py[d] / ww };
+  }
+
+  /* Devuelve {ctrl, knots, degree, weights} si la entidad lleva una
+     B-spline de verdad; null si sólo tiene puntos de ajuste. */
+  E.splineNurbs = function (ent) {
+    if (!ent || !ent.ctrl || ent.ctrl.length < 2) return null;
+    var P = ent.ctrl, n = P.length;
+    var d = Math.round(ent.degree || 3);
+    if (!(d >= 1)) d = 3;
+    if (d > n - 1) d = n - 1;
+    var U = (ent.knots && ent.knots.length === n + d + 1) ? ent.knots : null;
+    if (!U) {
+      /* Sin vector de nudos sólo se reconstruye uno cuando los puntos de
+         control son lo único que hay: si además hay puntos de ajuste, la
+         curva es la Catmull-Rom que dibujó quien la creó. */
+      if (ent.fit && ent.fit.length >= 2) return null;
+      U = nudosSujetos(n, d);
+    }
+    if (!(U[n] > U[d])) return null;
+    var W = (ent.weights && ent.weights.length === n) ? ent.weights : null;
+    return { ctrl: P, knots: U, degree: d, weights: W };
+  };
+
+  E.nurbsPts = function (nb, pasos) {
+    var P = nb.ctrl, U = nb.knots, d = nb.degree, W = nb.weights, n = P.length;
+    var tramos = [], i;
+    for (i = d; i < n; i++) if (U[i + 1] > U[i]) tramos.push(i);
+    if (!tramos.length) return P.slice();
+    /* densidad por tramo de nudos: fina cuando hay pocos, más suelta
+       cuando la curva trae cien tramos y el total se dispararía */
+    var porTramo = pasos ? Math.max(2, Math.round(pasos))
+                         : Math.max(8, Math.min(64, Math.ceil(1024 / tramos.length)));
+    var out = [];
+    for (var s = 0; s < tramos.length; s++) {
+      var k = tramos[s], a = U[k], b = U[k + 1];
+      for (var j = 0; j < porTramo; j++) out.push(deBoor(P, W, U, d, a + (b - a) * (j / porTramo)));
+    }
+    out.push(deBoor(P, W, U, d, U[n]));
+    return out;
+  };
+
+  /* Los puntos que se agarran y a los que se engancha el cursor: en una
+     B-spline de verdad son los de control, como en AutoCAD. */
+  E.splineGrips = function (ent) {
+    if (E.splineNurbs(ent)) return ent.ctrl;
+    return (ent.fit && ent.fit.length) ? ent.fit : (ent.ctrl || []);
+  };
+
+  /* Spline por Catmull-Rom sobre puntos de ajuste, o B-spline de verdad
+     si la entidad trae puntos de control con su vector de nudos */
+  E.splinePts = function (ent, pasos) {
+    var nb = E.splineNurbs(ent);
+    if (nb) return E.nurbsPts(nb, pasos);
     var f = ent.fit && ent.fit.length ? ent.fit : ent.ctrl;
     if (!f || f.length < 2) return f ? f.slice() : [];
     if (f.length === 2) return f.slice();
     var pts = f.slice();
     if (ent.closed) pts = [f[f.length - 1]].concat(f, [f[0], f[1]]);
     else pts = [f[0]].concat(f, [f[f.length - 1]]);
-    var out = [], steps = 16;
+    var out = [], steps = Math.max(2, Math.round(pasos || 16));
     for (var i = 1; i < pts.length - 2; i++) {
       var p0 = pts[i - 1], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2];
       for (var j = 0; j < steps; j++) {
@@ -938,7 +1033,7 @@
           E.snapPoints(c, doc).forEach(function (s) { s.ent = ent; out.push(s); });
         });
         break;
-      case 'SPLINE': (ent.fit || []).forEach(function (p) { push('end', p); }); break;
+      case 'SPLINE': E.splineGrips(ent).forEach(function (p) { push('end', p); }); break;
       case 'HATCH': break;
       case 'DIMENSION':
         ['p1', 'p2', 'p3', 'center'].forEach(function (k) { if (ent[k]) push('end', ent[k]); });
@@ -974,7 +1069,7 @@
       case 'TEXT': case 'MTEXT': case 'ATTDEF': case 'ATTRIB': g.push({ p: ent.p, k: 'p' }); break;
       case 'INSERT': g.push({ p: ent.p, k: 'p' }); break;
       case 'SOLID': ent.pts.forEach(function (p, i) { g.push({ p: p, k: 'p' + i }); }); break;
-      case 'SPLINE': (ent.fit || []).forEach(function (p, i) { g.push({ p: p, k: 'f' + i }); }); break;
+      case 'SPLINE': E.splineGrips(ent).forEach(function (p, i) { g.push({ p: p, k: 'f' + i }); }); break;
       case 'LEADER': ent.pts.forEach(function (p, i) { g.push({ p: p, k: 'p' + i }); }); break;
       case 'DIMENSION':
         ['p1', 'p2', 'p3', 'center'].forEach(function (k) { if (ent[k]) g.push({ p: ent[k], k: k }); });
@@ -1020,7 +1115,15 @@
         break;
       case 'POINT': case 'TEXT': case 'MTEXT': case 'ATTDEF': case 'ATTRIB': case 'INSERT': ent.p = G.clone(np); break;
       case 'SOLID': ent.pts[parseInt(key.slice(1), 10)] = G.clone(np); break;
-      case 'SPLINE': ent.fit[parseInt(key.slice(1), 10)] = G.clone(np); break;
+      case 'SPLINE': {
+        /* mover un punto de control deja sin sentido los de ajuste que
+           venían del fichero: la curva ya no es la que dibujó nadie */
+        var lst = E.splineGrips(ent), iG = parseInt(key.slice(1), 10);
+        if (lst[iG]) lst[iG] = G.clone(np);
+        if (lst === ent.ctrl) ent.fit = [];
+        else { ent.ctrl = []; ent.knots = null; ent.weights = null; }
+        break;
+      }
       case 'LEADER': ent.pts[parseInt(key.slice(1), 10)] = G.clone(np); break;
       case 'DIMENSION': ent[key] = G.clone(np); break;
       case 'HATCH': {

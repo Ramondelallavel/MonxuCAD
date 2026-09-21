@@ -242,19 +242,29 @@
         }
         break;
       case 'SPLINE': {
-        /* R12 no conoce la entidad SPLINE: allí sí hay que aplanarla. */
-        var bz = W.r2000 ? splineBezier(ent) : null;
+        /* R12 no conoce la entidad SPLINE: allí sí hay que aplanarla.
+           Si la entidad ya es una B-spline de verdad —viene de un
+           fichero— se devuelve con sus nudos y sus pesos intactos, sin
+           pasarla por la conversión a Bézier. */
+        var nb = E.splineNurbs(ent);
+        var bz = W.r2000 ? (nb ? { knots: nb.knots, ctrl: nb.ctrl, fit: (ent.fit || []),
+                                   degree: nb.degree, weights: nb.weights }
+                               : splineBezier(ent)) : null;
         if (!bz) { W.polyFromPts({ pts: E.splinePts(ent), closed: ent.closed }, ent, doc, owner); break; }
         W.entHead('SPLINE', ent, doc, owner, 'AcDbSpline');
         W.p(210, 0); W.p(220, 0); W.p(230, 1);
-        W.p(70, 8 | (ent.closed ? 3 : 0));   /* 8 = plana, 1+2 = cerrada y periódica */
-        W.p(71, 3);
+        /* 8 = plana, 1 = cerrada, 2 = periódica, 4 = racional */
+        W.p(70, 8 | (ent.closed ? 3 : 0) | (bz.weights ? 4 : 0));
+        W.p(71, bz.degree || 3);
         W.p(72, bz.knots.length);
         W.p(73, bz.ctrl.length);
         W.p(74, bz.fit.length);
         W.p(42, 1e-7); W.p(43, 1e-7); W.p(44, 1e-10);
         bz.knots.forEach(function (k) { W.p(40, k); });
-        bz.ctrl.forEach(function (c) { W.p(10, c.x); W.p(20, c.y); W.p(30, 0); });
+        bz.ctrl.forEach(function (c, i) {
+          W.p(10, c.x); W.p(20, c.y); W.p(30, 0);
+          if (bz.weights) W.p(41, bz.weights[i]);
+        });
         bz.fit.forEach(function (c) { W.p(11, c.x); W.p(21, c.y); W.p(31, 0); });
         break;
       }
@@ -1193,6 +1203,122 @@
     return o;
   }
 
+  /* ------------------------------------------------------------
+     DIRECTRIZ MÚLTIPLE (MULTILEADER)
+
+     Es la directriz de los dibujos modernos: sustituyó a LEADER hace
+     veinte años y cualquier plano de hoy viene lleno de ellas.  Antes se
+     descartaban en silencio —se avisaba, pero el texto de todas las
+     llamadas se perdía— y un plano importado quedaba mudo.
+
+     Todo lo que interesa vive dentro del bloque CONTEXT_DATA, que va
+     anidado con marcas de apertura y cierre repartidas por códigos
+     distintos: 300 abre el contexto y 301 lo cierra, 302 abre cada
+     directriz y 303 la cierra, y 304 sirve para DOS cosas —abre una
+     línea de directriz cuando su valor es "LEADER_LINE{" y, si no, es el
+     texto de la llamada—.  El 305 cierra la línea.
+     ------------------------------------------------------------ */
+  function leeMLeader(codes, o) {
+    var texto = '', alto = 0, ctx = 0, enDir = 0, linea = null;
+    var lineas = [], pendiente = null;
+    var aterriza = null, codo = null, largoCodo = 0, posTexto = null;
+    var i, c, v;
+    for (i = 0; i < codes.length; i++) {
+      c = codes[i][0]; v = codes[i][1];
+      if (c === 300) { ctx = 1; continue; }
+      if (c === 301) { ctx = 0; continue; }
+      if (!ctx) continue;
+      if (c === 302) { enDir = 1; continue; }
+      if (c === 303) { enDir = 0; continue; }
+      if (c === 304) {
+        if (/LEADER_LINE/.test(String(v))) linea = [];
+        else texto = unescapeTxt(String(v));
+        continue;
+      }
+      if (c === 305) { if (linea && linea.length) lineas.push(linea); linea = null; continue; }
+      if (c === 10) { pendiente = Number(v); continue; }
+      if (c === 20) {
+        if (pendiente === null) continue;
+        var q = { x: pendiente, y: Number(v) };
+        pendiente = null;
+        if (linea) linea.push(q);
+        else if (enDir) aterriza = q;         /* punto de aterrizaje */
+        continue;
+      }
+      if (!enDir) {
+        if (c === 41 && !alto) alto = Number(v) || 0;
+        else if (c === 12) posTexto = { x: Number(v), y: 0 };
+        else if (c === 22 && posTexto) posTexto.y = Number(v);
+        continue;
+      }
+      /* dentro de LEADER{ */
+      if (linea) continue;
+      if (c === 11) codo = { x: Number(v), y: 0 };
+      else if (c === 21 && codo) codo.y = Number(v);
+      else if (c === 40 && !largoCodo) largoCodo = Number(v) || 0;
+    }
+    if (!lineas.length && !aterriza) return null;
+
+    function remata(pts) {
+      var out = [];
+      pts.forEach(function (p) {
+        if (!out.length || G.dist(out[out.length - 1], p) > 1e-9) out.push({ x: p.x, y: p.y });
+      });
+      return out;
+    }
+    var salida = [];
+    lineas.forEach(function (pts, k) {
+      var cam = pts.slice();
+      if (aterriza) cam.push(aterriza);
+      if (codo && largoCodo) {
+        var n = Math.hypot(codo.x, codo.y) || 1;
+        var base = aterriza || cam[cam.length - 1];
+        cam.push({ x: base.x + codo.x / n * largoCodo, y: base.y + codo.y / n * largoCodo });
+      }
+      cam = remata(cam);
+      if (cam.length < 2) return;
+      /* el texto va en la primera: las demás son flechas extra de la
+         misma llamada y comparten el rótulo */
+      var d = E.leader(cam, k === 0 ? texto : '', o);
+      if (alto) d.h = alto;
+      salida.push(d);
+    });
+    if (!salida.length) {
+      /* una llamada sin línea de directriz: al menos el texto no se pierde */
+      if (texto && posTexto) return E.mtext(posTexto, alto || 2.5, texto, 0, o);
+      return null;
+    }
+    return salida.length === 1 ? salida[0] : salida;
+  }
+
+  /* ------------------------------------------------------------
+     WIPEOUT: el recuadro que tapa lo que hay debajo.  No se puede
+     reproducir el tapado sin saber el orden de dibujo y el fondo, pero
+     sí el contorno, que es lo que permite volver a colocarlo y volver a
+     exportarlo.  Los vértices vienen en coordenadas de imagen, de -0,5 a
+     0,5, y se llevan al dibujo con los vectores U y V.
+     ------------------------------------------------------------ */
+  function leeWipeout(codes, o) {
+    var ins = { x: get(codes, 10, 0), y: get(codes, 20, 0) };
+    var u = { x: get(codes, 11, 1), y: get(codes, 21, 0) };
+    var vv = { x: get(codes, 12, 0), y: get(codes, 22, 1) };
+    var sx = get(codes, 13, 1), sy = get(codes, 23, 1);
+    var cx = getAll(codes, 14), cy = getAll(codes, 24);
+    if (cx.length < 2) return null;
+    var pts = [];
+    for (var i = 0; i < cx.length; i++) {
+      var a = cx[i] + 0.5, b = (cy[i] === undefined ? 0 : cy[i]) + 0.5;
+      pts.push({ x: ins.x + u.x * a * sx + vv.x * b * sy,
+                 y: ins.y + u.y * a * sx + vv.y * b * sy });
+    }
+    /* dos vértices son las esquinas opuestas de un rectángulo */
+    if (pts.length === 2) {
+      var p0 = pts[0], p1 = pts[1];
+      pts = [p0, { x: p1.x, y: p0.y }, p1, { x: p0.x, y: p1.y }];
+    }
+    return E.pline(pts, true, o);
+  }
+
   function buildEntity(type, codes, pairs, idx, to, doc) {
     var o = common(codes);
     switch (type) {
@@ -1253,17 +1379,30 @@
         return E.pline(vs, !!(flags & 1), o);
       }
       case 'SPLINE': {
-        var fx = [], fy = [], cx = [], cy = [];
+        /* La curva la definen los puntos de CONTROL con su vector de
+           nudos (40) y, si es racional, sus pesos (41).  Los puntos de
+           ajuste (11/21) son opcionales y sólo cuentan por dónde pasó
+           quien la dibujó.  Meterlos todos en el mismo saco —que es lo
+           que se hacía— deformaba cualquier spline importada. */
+        var fx = [], fy = [], cx = [], cy = [], kn = [], wg = [];
         codes.forEach(function (c) {
           if (c[0] === 11) fx.push(c[1]); else if (c[0] === 21) fy.push(c[1]);
           else if (c[0] === 10) cx.push(c[1]); else if (c[0] === 20) cy.push(c[1]);
+          else if (c[0] === 40) kn.push(c[1]); else if (c[0] === 41) wg.push(c[1]);
         });
         var fit = fx.map(function (x, k2) { return { x: x, y: fy[k2] || 0 }; });
         var ctrl = cx.map(function (x, k2) { return { x: x, y: cy[k2] || 0 }; });
-        var pts = fit.length >= 2 ? fit : ctrl;
-        if (pts.length < 2) return null;
-        var sp = E.spline(pts, !!(get(codes, 70, 0) & 1), o);
-        if (!fit.length) sp.ctrl = ctrl;
+        if (fit.length < 2 && ctrl.length < 2) return null;
+        var flags = get(codes, 70, 0);
+        var sp = E.spline(fit.length >= 2 ? fit : [], !!(flags & 1), o);
+        sp.ctrl = ctrl;
+        sp.degree = Math.max(1, get(codes, 71, 3));
+        sp.knots = kn.length ? kn : null;
+        /* los pesos sólo valen si vienen uno por punto de control: hay
+           programas que escriben el grupo 41 sólo en los que no son 1 */
+        sp.weights = (wg.length === ctrl.length && wg.some(function (w) { return w !== 1; })) ? wg : null;
+        sp.periodica = !!(flags & 2);
+        if (!sp.fit.length && !ctrl.length) return null;
         return sp;
       }
       case 'TEXT': {
@@ -1406,6 +1545,10 @@
         var pts2 = lx.map(function (x, k3) { return { x: x, y: ly[k3] || 0 }; });
         return E.leader(pts2, '', o);
       }
+      case 'MULTILEADER': case 'MLEADER':
+        return leeMLeader(codes, o);
+      case 'WIPEOUT':
+        return leeWipeout(codes, o);
       case 'ATTDEF': {
         var ad = E.attdef({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
           String(get(codes, 2, 'ETIQUETA')), unescapeTxt(String(get(codes, 3, ''))),
