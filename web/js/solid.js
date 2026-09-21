@@ -284,14 +284,27 @@
 
   /* Segmentos de la silueta y aristas, proyectados a 2D.  Lo usa el
      renderizador 2D para que el sólido se vea también en el modelo. */
+  /* Planta del sólido: las aristas marcadas más la silueta vista desde
+     arriba.  Con 18° salían las facetas de los empalmes y la pieza
+     aparecía cubierta de triángulos; con 30° sólo se ven las aristas de
+     verdad, y la silueta pone el contorno de lo redondo, que si no se
+     quedaba sin dibujar. */
   S.segs2d = function (ent) {
     var mesh = S.meshOf(ent);
     if (!mesh) return [];
-    var ed = mesh.sharpEdges(18), out = [];
-    for (var i = 0; i < ed.length; i++) {
-      var a = mesh.verts[ed[i][0]], b = mesh.verts[ed[i][1]];
-      out.push([{ x: a.x, y: a.y }, { x: b.x, y: b.y }]);
+    var out = [], vistas = {}, i;
+    function mete(pares) {
+      for (var k = 0; k < pares.length; k++) {
+        var ia = pares[k][0], ib = pares[k][1];
+        var key = ia < ib ? ia + ',' + ib : ib + ',' + ia;
+        if (vistas[key]) continue;
+        vistas[key] = 1;
+        var a = mesh.verts[ia], b = mesh.verts[ib];
+        out.push([{ x: a.x, y: a.y }, { x: b.x, y: b.y }]);
+      }
     }
+    mete(mesh.sharpEdges(30));
+    try { mete(M.silhouette(mesh, G3.v(0, 0, 1), false)); } catch (e) { }
     return out;
   };
 
