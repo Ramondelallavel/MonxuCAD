@@ -28,7 +28,35 @@
     Cmd.order.push(main);
     list.forEach(function (nm) { Cmd.alias[nm.toUpperCase()] = main; });
     (opts.aliases || []).forEach(function (a) { Cmd.alias[a.toUpperCase()] = main; });
+    Cmd.rotulo = {};                 /* se reconstruye a la primera búsqueda */
     return def;
+  };
+
+  /* Los rótulos de los botones también se pueden escribir.
+     El nombre corto de AutoCAD (DESCOMP, BORRA, RECORTA...) es el que
+     manda, pero quien lee "Descomponer" en el botón y lo escribe tal
+     cual merece que funcione en vez de un "comando desconocido".  Van en
+     su propio índice para no ensuciar el autocompletado. */
+  Cmd.rotulo = {};
+  function llano(x) {
+    return String(x).toUpperCase()
+      .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+      .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
+      .replace(/[^A-Z0-9]/g, '');
+  }
+  CAD.llano = llano;
+  Cmd.indexaRotulos = function () {
+    Cmd.rotulo = {};
+    Object.keys(Cmd.alias).forEach(function (a) {
+      var k = llano(a);
+      if (k && !Cmd.rotulo[k]) Cmd.rotulo[k] = Cmd.alias[a];
+    });
+    Cmd.order.forEach(function (n) {
+      var d = Cmd.reg[n];
+      if (!d || !d.title) return;
+      var k = llano(d.title);
+      if (k && k.length <= 26 && !Cmd.rotulo[k]) Cmd.rotulo[k] = n;
+    });
   };
 
   Cmd.find = function (txt) {
@@ -36,6 +64,9 @@
     var t = String(txt).trim().toUpperCase().replace(/^[-_'"]+/, '');
     if (!t) return null;
     if (Cmd.alias[t]) return Cmd.reg[Cmd.alias[t]];
+    if (!Object.keys(Cmd.rotulo).length) Cmd.indexaRotulos();
+    var k = llano(t);
+    if (k && Cmd.rotulo[k]) return Cmd.reg[Cmd.rotulo[k]];
     return null;
   };
 
