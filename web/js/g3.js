@@ -369,11 +369,63 @@
   /* Triangulación por recorte de orejas sobre el plano del polígono.
      Tiene que aguantar polígonos con muchos vértices colineales: la
      reparación de uniones en T los inserta a propósito, y una prueba de
-     oreja ingenua los toma por vértices reflejos y se atasca. */
+     oreja ingenua los toma por vértices reflejos y se atasca.
+
+     Además garantiza dos cosas de las que depende la exportación:
+       · salen TODOS los vértices del contorno; si falta uno, la cara
+         vecina sí lo usa y la superficie se abre por ahí;
+       · ningún triángulo sale sin área.  Los triángulos planos hacían de
+         costura —quitándolos se abrían 135 aristas en una placa con
+         taladros—, y cualquier lector de STL medianamente estricto los
+         descarta, con lo que la pieza releída ya no era estanca. */
   G3.triangulate = function (pts) {
     var n = pts.length;
     if (n < 3) return [];
     if (n === 3) return [[0, 1, 2]];
+    /* primero con poda de colineales; si alguna reinserción no encaja se
+       repite sin podar, que es como se hacía antes y nunca pierde caras */
+    var r = tejeOrejas(pts, true);
+    if (r) return r;
+    return tejeOrejas(pts, false) || [];
+  };
+
+  /* ¿el vértice v cae dentro del tramo recto a-b?  Se mira en el plano
+     (que es donde se recorta) y también en 3D, para no aplanar de paso
+     una cara alabeada. */
+  function enTramo(pts, flat, a, v, b, epsA, epsD) {
+    var fa = flat[a], fv = flat[v], fb = flat[b];
+    var c = (fv.x - fa.x) * (fb.y - fa.y) - (fv.y - fa.y) * (fb.x - fa.x);
+    if (!(Math.abs(c) <= epsA)) return false;
+    var pa = pts[a], pv = pts[v], pb = pts[b];
+    var L2 = G3.dist2(pa, pb);
+    if (L2 < 1e-18) return false;
+    var t = G3.dot(G3.sub(pv, pa), G3.sub(pb, pa)) / L2;
+    if (t <= 1e-6 || t >= 1 - 1e-6) return false;
+    return G3.distToSeg(pv, pa, pb) <= Math.min(epsD, Math.sqrt(L2) * 1e-5);
+  }
+
+  /* Devuelve el vértice apartado al reparto, partiendo en dos el triángulo
+     que se apoya en la arista a-b.  El otro vértice de ese triángulo está
+     fuera de la recta, así que los dos trozos tienen área. */
+  function parteArista(tri, v, a, b) {
+    var hit = -1, he = 0, cnt = 0, i, j;
+    for (i = 0; i < tri.length; i++) {
+      var T = tri[i];
+      for (j = 0; j < 3; j++) {
+        var x = T[j], y = T[(j + 1) % 3];
+        if ((x === a && y === b) || (x === b && y === a)) { hit = i; he = j; cnt++; break; }
+      }
+    }
+    if (cnt !== 1) return false;          /* arista interior o repetida */
+    var T2 = tri[hit];
+    var i0 = T2[he], i1 = T2[(he + 1) % 3], i2 = T2[(he + 2) % 3];
+    tri[hit] = [i0, v, i2];
+    tri.push([v, i1, i2]);
+    return true;
+  }
+
+  function tejeOrejas(pts, podar) {
+    var n = pts.length;
     var nrm = G3.polyNormal(pts);
     if (G3.len2(nrm) < 1e-20) return [];
     var ax = G3.arbitraryAxis(nrm);
@@ -420,6 +472,30 @@
     idx = clean;
     if (idx.length < 3) return [];
 
+    /* ---------------------------------------------------------------
+       Vértices intermedios de un tramo recto: se apartan del reparto.
+       Nunca pueden ser oreja (su triángulo no tiene área) y, dejándolos,
+       la tijera acaba arrinconándolos en un resto totalmente alineado
+       que sólo se puede cortar en lonchas planas.  Se anota con qué
+       pareja de vecinos salió cada uno y se devuelven al final en orden
+       inverso, que es justo cuando su arista vuelve a existir.
+       --------------------------------------------------------------- */
+    var fuera = [];
+    if (podar) {
+      var otra = true, gp = 0;
+      while (otra && idx.length > 3 && gp++ < n + 4) {
+        otra = false;
+        for (k = 0; k < idx.length && idx.length > 3; k++) {
+          var mp = idx.length;
+          var va = idx[(k + mp - 1) % mp], vv = idx[k], vb = idx[(k + 1) % mp];
+          if (!enTramo(pts, flat, va, vv, vb, EPSA, EPSD)) continue;
+          fuera.push({ v: vv, a: va, b: vb });
+          idx.splice(k, 1); k--; otra = true;
+        }
+      }
+      if (idx.length < 3) return null;
+    }
+
     var tri = [];
     var guard = 0, maxGuard = idx.length * idx.length + 32;
 
@@ -451,9 +527,19 @@
         if (q2 > bestQ) { bestQ = q2; cut = k; }
       }
       if (cut < 0) {
-        /* Ninguna oreja válida: casi siempre porque quedan vértices
-           colineales.  Se corta igualmente la oreja más plana en vez de
-           borrar el vértice: el triángulo sale casi sin área, pero el
+        /* Ninguna oreja válida.  Si es porque queda algún vértice metido
+           en un tramo recto, se aparta como arriba y se sigue: el resto
+           del polígono no cambia de forma y el vértice vuelve al final. */
+        var sacado = -1;
+        for (k = 0; k < m; k++) {
+          var w0 = idx[(k + m - 1) % m], w1 = idx[k], w2 = idx[(k + 1) % m];
+          if (!enTramo(pts, flat, w0, w1, w2, EPSA, EPSD)) continue;
+          fuera.push({ v: w1, a: w0, b: w2 });
+          sacado = k; break;
+        }
+        if (sacado >= 0) { idx.splice(sacado, 1); continue; }
+        /* Último recurso: se corta igualmente la oreja más plana en vez de
+           borrar el vértice.  El triángulo sale casi sin área, pero el
            vértice se conserva y el contorno sigue coincidiendo con el de
            la cara vecina.  Si se borrase, esa cara sí lo usaría y la
            superficie se abriría por ahí. */
@@ -483,8 +569,12 @@
       for (k = 1; k < idx.length - 1; k++)
         tri.push([idx[bi], idx[(bi + k) % idx.length], idx[(bi + k + 1) % idx.length]]);
     }
+
+    /* devolución de los apartados, del último al primero */
+    for (i = fuera.length - 1; i >= 0; i--)
+      if (!parteArista(tri, fuera[i].v, fuera[i].a, fuera[i].b)) return null;
     return tri;
-  };
+  }
   function dist2(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
 
   /* ---------- Muestreo de curvas 2D del dibujo hacia 3D ---------- */

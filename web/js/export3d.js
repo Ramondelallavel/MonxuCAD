@@ -539,6 +539,25 @@
   /* ============================================================
      Lector de STL (texto y binario) para importar
      ============================================================ */
+  /* ------------------------------------------------------------
+     Tolerancia de soldadura al leer una malla de un archivo.
+     El STL binario guarda las coordenadas en float32: unos siete dígitos.
+     En una pieza de 100 mm, dos vértices que eran el mismo número en
+     doble precisión pueden llegar separados hasta una cienmilésima, muy
+     por encima de la tolerancia fija de 1e-6 con la que se soldaba.  El
+     resultado era una malla llena de grietas: se leían menos triángulos
+     de los escritos y la pieza dejaba de ser estanca justo cuando se iba
+     a fabricar.  La tolerancia se saca ahora del tamaño de la propia
+     pieza, muy por debajo de cualquier detalle real.
+     ------------------------------------------------------------ */
+  function soldaduraPara(mesh) {
+    if (!mesh || !mesh.verts.length) return 1e-7;
+    var b = mesh.bbox();
+    var diag = Math.hypot(b.x2 - b.x1, b.y2 - b.y1, b.z2 - b.z1);
+    return Math.max(1e-7, diag * 5e-7);
+  }
+  X.soldaduraPara = soldaduraPara;
+
   X.readStl = function (data) {
     if (typeof data === 'string') return readStlAscii(data);
     var u8 = new Uint8Array(data);
@@ -566,7 +585,7 @@
       mesh.faces.push([base, base + 1, base + 2]);
       off += 50;
     }
-    return mesh.weld(1e-6).clean();
+    return mesh.weld(soldaduraPara(mesh)).clean();
   };
   function readStlAscii(txt) {
     var mesh = new M.Mesh([], []);
@@ -580,7 +599,7 @@
         buf = [];
       }
     }
-    return mesh.verts.length ? mesh.weld(1e-6).clean() : null;
+    return mesh.verts.length ? mesh.weld(soldaduraPara(mesh)).clean() : null;
   }
 
   /* Lector de OBJ */
