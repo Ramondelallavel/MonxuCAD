@@ -484,7 +484,7 @@
       for (var i = 0; i < tris.length; i++) {
         var a = mesh.verts[tris[i][0]], b = mesh.verts[tris[i][1]], c = mesh.verts[tris[i][2]];
         p(0, '3DFACE');
-        if (handleFn) p(5, handleFn());
+        if (typeof handleFn === 'function') p(5, handleFn());
         p(100, 'AcDbEntity'); p(8, layer);
         p(100, 'AcDbFace');
         p(10, a.x); p(20, a.y); p(30, a.z);
@@ -505,7 +505,7 @@
       var layer = (parts[q].ent && parts[q].ent.layer) || '0';
       var tris = mesh.triangles();
       p(0, 'POLYLINE');
-      if (handleFn) p(5, handleFn());
+      if (typeof handleFn === 'function') p(5, handleFn());
       p(100, 'AcDbEntity'); p(8, layer);
       p(100, 'AcDb3dPolyline');
       p(66, 1); p(10, 0); p(20, 0); p(30, 0);
@@ -514,7 +514,7 @@
       for (var i = 0; i < mesh.verts.length; i++) {
         var v = mesh.verts[i];
         p(0, 'VERTEX');
-        if (handleFn) p(5, handleFn());
+        if (typeof handleFn === 'function') p(5, handleFn());
         p(100, 'AcDbEntity'); p(8, layer);
         p(100, 'AcDbVertex'); p(100, 'AcDbPolyFaceMeshVertex');
         p(10, v.x); p(20, v.y); p(30, v.z);
@@ -522,7 +522,7 @@
       }
       for (i = 0; i < tris.length; i++) {
         p(0, 'VERTEX');
-        if (handleFn) p(5, handleFn());
+        if (typeof handleFn === 'function') p(5, handleFn());
         p(100, 'AcDbEntity'); p(8, layer);
         p(100, 'AcDbVertex'); p(100, 'AcDbFaceRecord');
         p(10, 0); p(20, 0); p(30, 0);
@@ -530,7 +530,7 @@
         p(71, tris[i][0] + 1); p(72, tris[i][1] + 1); p(73, tris[i][2] + 1);
       }
       p(0, 'SEQEND');
-      if (handleFn) p(5, handleFn());
+      if (typeof handleFn === 'function') p(5, handleFn());
       p(8, layer);
     }
     return out;
@@ -631,31 +631,429 @@
   };
 
   /* Lector de PLY (ascii) */
-  X.readPly = function (txt) {
-    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
-    var end = txt.indexOf('end_header');
-    if (end < 0) return null;
-    var hdr = txt.slice(0, end).split('\n');
-    var nv = 0, nf = 0, bin = false;
-    for (var i = 0; i < hdr.length; i++) {
-      var t = hdr[i].trim();
-      if (/^format\s+binary/.test(t)) bin = true;
-      var m2 = /^element\s+vertex\s+(\d+)/.exec(t); if (m2) nv = +m2[1];
-      m2 = /^element\s+face\s+(\d+)/.exec(t); if (m2) nf = +m2[1];
+  /* ------------------------------------------------------------
+     PLY: cabecera de texto y cuerpo en texto o binario.  Se admite
+     cualquier orden y número de propiedades: se buscan x, y, z entre las
+     del vértice y la lista de índices entre las de la cara, que es lo
+     único que hace falta para la geometría.
+     ------------------------------------------------------------ */
+  var TIPOS = { char: 1, int8: 1, uchar: 1, uint8: 1, short: 2, int16: 2, ushort: 2, uint16: 2,
+                int: 4, int32: 4, uint: 4, uint32: 4, float: 4, float32: 4, double: 8, float64: 8 };
+  function leeTipo(dv, off, tipo, le) {
+    switch (tipo) {
+      case 'char': case 'int8': return dv.getInt8(off);
+      case 'uchar': case 'uint8': return dv.getUint8(off);
+      case 'short': case 'int16': return dv.getInt16(off, le);
+      case 'ushort': case 'uint16': return dv.getUint16(off, le);
+      case 'int': case 'int32': return dv.getInt32(off, le);
+      case 'uint': case 'uint32': return dv.getUint32(off, le);
+      case 'float': case 'float32': return dv.getFloat32(off, le);
+      case 'double': case 'float64': return dv.getFloat64(off, le);
     }
-    if (bin) return null;
-    var body = txt.slice(end + 'end_header'.length).split('\n').filter(function (s) { return s.trim(); });
+    return 0;
+  }
+  X.readPly = function (datos) {
+    var u8 = null, txt = null;
+    if (typeof datos === 'string') txt = datos;
+    else { u8 = datos instanceof Uint8Array ? datos : new Uint8Array(datos); }
+    /* la cabecera siempre es texto, aunque el cuerpo no lo sea */
+    var cab;
+    if (txt !== null) cab = txt;
+    else {
+      var lim = Math.min(u8.length, 65536), s = '';
+      for (var z = 0; z < lim; z++) s += String.fromCharCode(u8[z]);
+      cab = s;
+    }
+    var fin = cab.indexOf('end_header');
+    if (fin < 0) return null;
+    var finLinea = cab.indexOf('\n', fin);
+    if (finLinea < 0) return null;
+    var lineas = cab.slice(0, fin).split('\n');
+    var formato = 'ascii', elems = [], actual = null;
+    for (var i = 0; i < lineas.length; i++) {
+      var t = lineas[i].trim();
+      var m = /^format\s+(\S+)/.exec(t);
+      if (m) { formato = m[1]; continue; }
+      m = /^element\s+(\S+)\s+(\d+)/.exec(t);
+      if (m) { actual = { nombre: m[1], n: +m[2], props: [] }; elems.push(actual); continue; }
+      m = /^property\s+list\s+(\S+)\s+(\S+)\s+(\S+)/.exec(t);
+      if (m && actual) { actual.props.push({ lista: true, cuenta: m[1], tipo: m[2], nombre: m[3] }); continue; }
+      m = /^property\s+(\S+)\s+(\S+)/.exec(t);
+      if (m && actual) actual.props.push({ lista: false, tipo: m[1], nombre: m[2] });
+    }
     var mesh = new M.Mesh([], []);
-    for (i = 0; i < nv && i < body.length; i++) {
-      var p = body[i].trim().split(/\s+/);
+    var eV = null, eF = null;
+    for (i = 0; i < elems.length; i++) {
+      if (elems[i].nombre === 'vertex') eV = elems[i];
+      else if (elems[i].nombre === 'face') eF = elems[i];
+    }
+    if (!eV) return null;
+
+    if (/ascii/i.test(formato)) {
+      var cuerpo = (txt !== null ? txt : new TextDecoder().decode(u8))
+        .slice(finLinea + 1).split('\n');
+      var fila = 0;
+      function siguiente() {
+        while (fila < cuerpo.length && !cuerpo[fila].trim()) fila++;
+        return fila < cuerpo.length ? cuerpo[fila++].trim().split(/\s+/) : null;
+      }
+      for (var e = 0; e < elems.length; e++) {
+        var el = elems[e];
+        for (var k = 0; k < el.n; k++) {
+          var campos = siguiente(); if (!campos) break;
+          if (el === eV) {
+            var vals = {}, c = 0;
+            for (var pj = 0; pj < el.props.length; pj++) {
+              var pr = el.props[pj];
+              if (pr.lista) { var nn = +campos[c++]; c += nn; continue; }
+              vals[pr.nombre] = +campos[c++];
+            }
+            mesh.verts.push(G3.v(vals.x || 0, vals.y || 0, vals.z || 0));
+          } else if (el === eF) {
+            var c2 = 0, cara = null;
+            for (pj = 0; pj < el.props.length; pj++) {
+              pr = el.props[pj];
+              if (!pr.lista) { c2++; continue; }
+              var cuantos = +campos[c2++], lst = [];
+              for (var q2 = 0; q2 < cuantos; q2++) lst.push(+campos[c2++]);
+              if (!cara && lst.length >= 3) cara = lst;
+            }
+            if (cara && cara.length >= 3) mesh.faces.push(cara);
+          }
+        }
+      }
+    } else {
+      if (u8 === null) return null;           /* binario pedido como texto */
+      var le = !/big/i.test(formato);
+      var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      var off = finLinea + 1;
+      for (e = 0; e < elems.length; e++) {
+        el = elems[e];
+        for (k = 0; k < el.n && off < u8.length; k++) {
+          var vv = {}, caraB = null;
+          for (pj = 0; pj < el.props.length; pj++) {
+            pr = el.props[pj];
+            if (pr.lista) {
+              var nB = leeTipo(dv, off, pr.cuenta, le); off += TIPOS[pr.cuenta] || 1;
+              var lB = [];
+              for (q2 = 0; q2 < nB; q2++) { lB.push(leeTipo(dv, off, pr.tipo, le)); off += TIPOS[pr.tipo] || 4; }
+              if (!caraB && lB.length >= 3) caraB = lB;
+            } else {
+              vv[pr.nombre] = leeTipo(dv, off, pr.tipo, le); off += TIPOS[pr.tipo] || 4;
+            }
+          }
+          if (el === eV) mesh.verts.push(G3.v(vv.x || 0, vv.y || 0, vv.z || 0));
+          else if (el === eF && caraB && caraB.length >= 3) mesh.faces.push(caraB);
+        }
+      }
+    }
+    return sano(mesh);
+  };
+
+  /* ------------------------------------------------------------
+     OFF (y sus variantes COFF, NOFF, STOFF: llevan color o normal por
+     vértice detrás de las coordenadas, que se ignoran)
+     ------------------------------------------------------------ */
+  X.readOff = function (txt) {
+    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
+    var L = txt.split('\n').map(function (s) { return s.trim(); })
+      .filter(function (s) { return s && s[0] !== '#'; });
+    if (!L.length || !/OFF\s*$|OFF\s+\d/.test(L[0])) return null;
+    var cab, ini;
+    if (/^\w*OFF$/.test(L[0])) { cab = L[1].split(/\s+/); ini = 2; }
+    else { cab = L[0].replace(/^\w*OFF/, '').trim().split(/\s+/); ini = 1; }
+    var nv = +cab[0], nf = +cab[1];
+    if (!(nv > 0)) return null;
+    var mesh = new M.Mesh([], []), i;
+    for (i = 0; i < nv && ini + i < L.length; i++) {
+      var p = L[ini + i].split(/\s+/);
       mesh.verts.push(G3.v(+p[0], +p[1], +p[2]));
     }
-    for (var j = 0; j < nf && nv + j < body.length; j++) {
-      p = body[nv + j].trim().split(/\s+/);
-      var n = +p[0], f = [];
-      for (var k = 1; k <= n; k++) f.push(+p[k]);
+    for (i = 0; i < nf && ini + nv + i < L.length; i++) {
+      var q = L[ini + nv + i].split(/\s+/);
+      var n = +q[0], f = [];
+      for (var k = 1; k <= n; k++) f.push(+q[k]);
       if (f.length >= 3) mesh.faces.push(f);
     }
-    return mesh.verts.length ? mesh.clean() : null;
+    return sano(mesh);
   };
+
+  /* ------------------------------------------------------------
+     AMF: XML con los vértices en <coordinates> y las caras en <triangle>.
+     Puede traer varios objetos; se juntan todos en una malla.
+     ------------------------------------------------------------ */
+  X.readAmf = function (txt) {
+    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
+    var doc = new DOMParser().parseFromString(txt, 'application/xml');
+    if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+    var objs = doc.getElementsByTagName('object');
+    if (!objs.length) return null;
+    var esc = escalaUnidad((doc.documentElement.getAttribute('unit') || '').toLowerCase());
+    var mesh = new M.Mesh([], []);
+    for (var o = 0; o < objs.length; o++) {
+      var base = mesh.verts.length;
+      var vs = objs[o].getElementsByTagName('vertex');
+      for (var i = 0; i < vs.length; i++) {
+        var c = vs[i].getElementsByTagName('coordinates')[0];
+        if (!c) continue;
+        mesh.verts.push(G3.v(num(c, 'x') * esc, num(c, 'y') * esc, num(c, 'z') * esc));
+      }
+      var ts = objs[o].getElementsByTagName('triangle');
+      for (i = 0; i < ts.length; i++) {
+        var a = num(ts[i], 'v1'), b = num(ts[i], 'v2'), d = num(ts[i], 'v3');
+        mesh.faces.push([base + a, base + b, base + d]);
+      }
+    }
+    return sano(mesh);
+  };
+  function num(el, tag) {
+    var n = el.getElementsByTagName(tag)[0];
+    return n ? +(n.textContent || 0) : 0;
+  }
+  function escalaUnidad(u) {
+    if (u === 'meter' || u === 'metre') return 1000;
+    if (u === 'centimeter' || u === 'centimetre') return 10;
+    if (u === 'inch') return 25.4;
+    if (u === 'foot') return 304.8;
+    if (u === 'micron' || u === 'micrometer') return 0.001;
+    return 1;                                /* milímetro */
+  }
+
+  /* ------------------------------------------------------------
+     3MF: el XML que va dentro del paquete.  Cada <item> del <build>
+     coloca un objeto con su matriz; los objetos compuestos
+     (<components>) se resuelven en cascada.
+     ------------------------------------------------------------ */
+  X.read3mfModel = function (txt) {
+    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
+    var doc = new DOMParser().parseFromString(txt, 'application/xml');
+    if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+    var raiz = doc.documentElement;
+    var esc = escalaUnidad((raiz.getAttribute('unit') || '').toLowerCase());
+    var objs = {}, lista = doc.getElementsByTagName('object');
+    for (var i = 0; i < lista.length; i++) objs[lista[i].getAttribute('id')] = lista[i];
+    var fuera = new M.Mesh([], []);
+    function mat(s) {
+      if (!s) return null;
+      var v = s.trim().split(/\s+/).map(Number);
+      if (v.length < 12 || v.some(function (x) { return !isFinite(x); })) return null;
+      /* 3MF da 4 filas de 3: la cuarta columna es siempre 0,0,0,1 */
+      return [v[0], v[1], v[2], 0, v[3], v[4], v[5], 0, v[6], v[7], v[8], 0, v[9], v[10], v[11], 1];
+    }
+    function mete(obj, m, prof) {
+      if (!obj || prof > 12) return;
+      var ma = obj.getElementsByTagName('mesh')[0];
+      if (ma && ma.parentNode === obj) {
+        var trozo = new M.Mesh([], []);
+        var vs = ma.getElementsByTagName('vertex');
+        for (var j = 0; j < vs.length; j++)
+          trozo.verts.push(G3.v(+vs[j].getAttribute('x') * esc, +vs[j].getAttribute('y') * esc,
+                                +vs[j].getAttribute('z') * esc));
+        var ts = ma.getElementsByTagName('triangle');
+        for (j = 0; j < ts.length; j++)
+          trozo.faces.push([+ts[j].getAttribute('v1'), +ts[j].getAttribute('v2'), +ts[j].getAttribute('v3')]);
+        if (m) trozo.transform(m);
+        fuera.append(trozo);
+      }
+      var comps = obj.getElementsByTagName('component');
+      for (j = 0; j < comps.length; j++) {
+        var hijo = objs[comps[j].getAttribute('objectid')];
+        var mh = mat(comps[j].getAttribute('transform'));
+        mete(hijo, m && mh ? G3.mMul(m, mh) : (mh || m), prof + 1);
+      }
+    }
+    var items = doc.getElementsByTagName('item');
+    if (items.length) {
+      for (i = 0; i < items.length; i++)
+        mete(objs[items[i].getAttribute('objectid')], mat(items[i].getAttribute('transform')), 0);
+    } else {
+      for (var id in objs) mete(objs[id], null, 0);
+    }
+    return sano(fuera);
+  };
+  /* Paquete .3mf completo (ZIP).  Devuelve una promesa. */
+  X.read3mf = async function (buf) {
+    var files = await CAD.Exporter.unzip(buf);
+    var modelo = null;
+    for (var i = 0; i < files.length; i++)
+      if (/\.model$/i.test(files[i].name)) { modelo = files[i]; if (/3dmodel\.model$/i.test(files[i].name)) break; }
+    if (!modelo) throw new Error('el paquete no lleva ningún modelo 3D');
+    return X.read3mfModel(new TextDecoder().decode(modelo.data));
+  };
+
+  /* ------------------------------------------------------------
+     X3D: <IndexedFaceSet coordIndex="..."> con <Coordinate point="...">
+     ------------------------------------------------------------ */
+  X.readX3d = function (txt) {
+    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
+    var doc = new DOMParser().parseFromString(txt, 'application/xml');
+    if (!doc || doc.getElementsByTagName('parsererror').length) return null;
+    var sets = doc.getElementsByTagName('IndexedFaceSet');
+    if (!sets.length) return null;
+    var mesh = new M.Mesh([], []);
+    for (var s = 0; s < sets.length; s++) {
+      var co = sets[s].getElementsByTagName('Coordinate')[0];
+      if (!co) continue;
+      var pts = (co.getAttribute('point') || '').trim().split(/[\s,]+/).map(Number);
+      var base = mesh.verts.length;
+      for (var i = 0; i + 2 < pts.length; i += 3) mesh.verts.push(G3.v(pts[i], pts[i + 1], pts[i + 2]));
+      var idx = (sets[s].getAttribute('coordIndex') || '').trim().split(/[\s,]+/).map(Number);
+      var cara = [];
+      for (i = 0; i < idx.length; i++) {
+        if (idx[i] < 0) { if (cara.length >= 3) mesh.faces.push(cara.map(function (k) { return base + k; })); cara = []; }
+        else cara.push(idx[i]);
+      }
+      if (cara.length >= 3) mesh.faces.push(cara.map(function (k) { return base + k; }));
+    }
+    return sano(mesh);
+  };
+
+  /* ------------------------------------------------------------
+     glTF 2.0 y GLB.  Se leen las mallas con su posición y sus índices;
+     los nodos aportan la colocación de cada una.
+     ------------------------------------------------------------ */
+  var COMP = { 5120: [1, 'getInt8'], 5121: [1, 'getUint8'], 5122: [2, 'getInt16'],
+               5123: [2, 'getUint16'], 5125: [4, 'getUint32'], 5126: [4, 'getFloat32'] };
+  var NUMCOMP = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  X.readGltf = function (datos) {
+    var json = null, bin = null;
+    if (typeof datos === 'string') json = JSON.parse(datos);
+    else {
+      var u8 = datos instanceof Uint8Array ? datos : new Uint8Array(datos);
+      var dv0 = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      if (u8.length > 12 && dv0.getUint32(0, true) === 0x46546C67) {   /* 'glTF' */
+        var off = 12;
+        while (off + 8 <= u8.length) {
+          var len = dv0.getUint32(off, true), tipo = dv0.getUint32(off + 4, true);
+          var cuerpo = u8.subarray(off + 8, off + 8 + len);
+          if (tipo === 0x4E4F534A) json = JSON.parse(new TextDecoder().decode(cuerpo));
+          else if (tipo === 0x004E4942) bin = cuerpo;
+          off += 8 + len;
+          if (len % 4) off += 4 - (len % 4);   /* los trozos van alineados a 4 */
+        }
+      } else json = JSON.parse(new TextDecoder().decode(u8));
+    }
+    if (!json || !json.meshes) return null;
+    var bufs = (json.buffers || []).map(function (b) {
+      if (!b.uri) return bin;
+      var m = /^data:[^;]*;base64,(.*)$/.exec(b.uri);
+      if (!m) return null;
+      var s = atob(m[1]), a = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+      return a;
+    });
+    function lee(ai) {
+      var ac = json.accessors[ai];
+      if (!ac || ac.bufferView === undefined) return null;
+      var bv = json.bufferViews[ac.bufferView];
+      var buf = bufs[bv.buffer];
+      if (!buf) return null;
+      var comp = COMP[ac.componentType]; if (!comp) return null;
+      var nc = NUMCOMP[ac.type] || 1;
+      var paso = bv.byteStride || comp[0] * nc;
+      var base = (bv.byteOffset || 0) + (ac.byteOffset || 0);
+      var dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+      var out = [];
+      for (var i = 0; i < ac.count; i++) {
+        var fila = [];
+        for (var j = 0; j < nc; j++) fila.push(dv[comp[1]](base + i * paso + j * comp[0], true));
+        out.push(nc === 1 ? fila[0] : fila);
+      }
+      return out;
+    }
+    var mallas = json.meshes.map(function (me) {
+      var m = new M.Mesh([], []);
+      (me.primitives || []).forEach(function (pr) {
+        if (pr.mode !== undefined && pr.mode !== 4) return;    /* sólo triángulos */
+        if (!pr.attributes || pr.attributes.POSITION === undefined) return;
+        var pos = lee(pr.attributes.POSITION); if (!pos) return;
+        var base = m.verts.length;
+        pos.forEach(function (p) { m.verts.push(G3.v(p[0], p[1], p[2])); });
+        var idx = pr.indices !== undefined ? lee(pr.indices) : null;
+        if (idx) { for (var i = 0; i + 2 < idx.length; i += 3) m.faces.push([base + idx[i], base + idx[i + 1], base + idx[i + 2]]); }
+        else { for (i = 0; i + 2 < pos.length; i += 3) m.faces.push([base + i, base + i + 1, base + i + 2]); }
+      });
+      return m;
+    });
+    var fuera = new M.Mesh([], []);
+    var nodos = json.nodes || [];
+    function nodoM(nd) {
+      if (nd.matrix) return nd.matrix.slice();
+      var m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+      if (nd.scale) m = G3.mMul(G3.mScale(nd.scale[0], nd.scale[1], nd.scale[2]), m);
+      if (nd.rotation) m = G3.mMul(quatM(nd.rotation), m);
+      if (nd.translation) m = G3.mMul(G3.mTrans(nd.translation[0], nd.translation[1], nd.translation[2]), m);
+      return m;
+    }
+    function quatM(q) {
+      var x = q[0], y = q[1], z = q[2], w = q[3];
+      return [1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w), 0,
+              2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w), 0,
+              2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y), 0,
+              0, 0, 0, 1];
+    }
+    var visto = {};
+    function anda(ni, m, prof) {
+      if (prof > 20 || visto[ni + ':' + prof]) return;
+      var nd = nodos[ni]; if (!nd) return;
+      var mm = G3.mMul(m, nodoM(nd));
+      if (nd.mesh !== undefined && mallas[nd.mesh]) {
+        var c = mallas[nd.mesh].clone(); c.transform(mm); fuera.append(c);
+      }
+      (nd.children || []).forEach(function (h) { anda(h, mm, prof + 1); });
+    }
+    var raiz = (json.scenes && json.scenes[json.scene || 0] && json.scenes[json.scene || 0].nodes) || null;
+    if (raiz) raiz.forEach(function (ni) { anda(ni, [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1], 0); });
+    else mallas.forEach(function (m) { fuera.append(m.clone()); });
+    return sano(fuera);
+  };
+
+  /* ------------------------------------------------------------
+     VRML 2.0: se buscan los pares "point [ ... ]" y "coordIndex [ ... ]"
+     de cada IndexedFaceSet.  No es un analizador de VRML completo —no
+     hace falta para la geometría— pero sí entiende varios Shape y los
+     comentarios.
+     ------------------------------------------------------------ */
+  X.readWrl = function (txt) {
+    if (typeof txt !== 'string') txt = new TextDecoder().decode(txt);
+    txt = txt.replace(/#[^\n]*/g, ' ');
+    var re = /IndexedFaceSet\s*\{/g, m, mesh = new M.Mesh([], []);
+    while ((m = re.exec(txt))) {
+      var bloque = txt.slice(m.index, m.index + 4000000);
+      var mp = /point\s*\[([^\]]*)\]/.exec(bloque);
+      var mi = /coordIndex\s*\[([^\]]*)\]/.exec(bloque);
+      if (!mp || !mi) continue;
+      var pts = mp[1].trim().split(/[\s,]+/).map(Number);
+      var base = mesh.verts.length;
+      for (var i = 0; i + 2 < pts.length; i += 3) mesh.verts.push(G3.v(pts[i], pts[i + 1], pts[i + 2]));
+      var idx = mi[1].trim().split(/[\s,]+/).map(Number), cara = [];
+      for (i = 0; i < idx.length; i++) {
+        if (!isFinite(idx[i])) continue;
+        if (idx[i] < 0) { if (cara.length >= 3) mesh.faces.push(cara); cara = []; }
+        else cara.push(base + idx[i]);
+      }
+      if (cara.length >= 3) mesh.faces.push(cara);
+    }
+    return sano(mesh);
+  };
+
+  /* Cierre común: soldar, limpiar y devolver sólo si queda algo */
+  function sano(mesh) {
+    if (!mesh || !mesh.verts.length || !mesh.faces.length) return null;
+    var n = mesh.verts.length, buenas = [];
+    for (var i = 0; i < mesh.faces.length; i++) {
+      var f = mesh.faces[i], ok = f.length >= 3;
+      for (var j = 0; ok && j < f.length; j++)
+        if (!(f[j] >= 0 && f[j] < n) || !isFinite(f[j])) ok = false;
+      if (ok) buenas.push(f);
+    }
+    mesh.faces = buenas;
+    for (i = 0; i < mesh.verts.length; i++) {
+      var p = mesh.verts[i];
+      if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) { p.x = p.y = p.z = 0; }
+    }
+    if (!mesh.faces.length) return null;
+    mesh.weld(soldaduraPara(mesh));
+    return mesh.clean();
+  }
 })();

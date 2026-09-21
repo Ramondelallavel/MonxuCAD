@@ -94,15 +94,26 @@
 
   Cmd.add(['IMPORTA3D', 'IMPORT3D'], { group: 'insert', icon: 'import3d', title: 'Importar modelo 3D' },
   async function (ctx) {
-    var file = await ctx.app.ui.pickFile('.stl,.obj,.ply,.off');
+    var file = await ctx.app.ui.pickFile('.stl,.obj,.ply,.off,.3mf,.amf,.x3d,.gltf,.glb,.wrl');
     if (!file) return;
     var name = (file.name || '').toLowerCase();
     var mesh = null;
     try {
-      if (/\.stl$/.test(name)) mesh = X3.readStl(await file.arrayBuffer());
-      else if (/\.obj$/.test(name)) mesh = X3.readObj(await file.text());
-      else if (/\.ply$/.test(name)) mesh = X3.readPly(await file.text());
-      else if (/\.off$/.test(name)) mesh = readOff(await file.text());
+      /* Se lee siempre en crudo: leerlo como texto estropea los formatos
+         binarios (un PLY binario o un GLB) antes de mirarlos siquiera.
+         Cada lector decodifica lo que necesite. */
+      var buf = await file.arrayBuffer();
+      var texto = function () { return new TextDecoder().decode(buf); };
+      if (/\.stl$/.test(name)) mesh = X3.readStl(buf);
+      else if (/\.obj$/.test(name)) mesh = X3.readObj(texto());
+      else if (/\.ply$/.test(name)) mesh = X3.readPly(buf);
+      else if (/\.off$/.test(name)) mesh = X3.readOff(texto());
+      else if (/\.3mf$/.test(name)) mesh = await X3.read3mf(buf);
+      else if (/\.amf$/.test(name)) mesh = X3.readAmf(texto());
+      else if (/\.x3d$/.test(name)) mesh = X3.readX3d(texto());
+      else if (/\.(gltf|glb)$/.test(name)) mesh = X3.readGltf(buf);
+      else if (/\.wrl$/.test(name)) mesh = X3.readWrl(texto());
+      else { ctx.err('Formato no reconocido: ' + name.replace(/^.*\./, '.')); return; }
     } catch (err) { ctx.err('Error al leer el archivo: ' + err.message); return; }
     if (!mesh || !mesh.faces.length) { ctx.err('No se ha podido interpretar el archivo.'); return; }
     ctx.doc.mark('IMPORTA3D');
@@ -117,25 +128,7 @@
             mesh.verts.length + ' vértices' + (chk.estanco ? ', estanco.' : ', malla abierta.'));
   });
 
-  function readOff(txt) {
-    var L = txt.split('\n').map(function (s) { return s.trim(); }).filter(function (s) { return s && s[0] !== '#'; });
-    if (!/^OFF/.test(L[0])) return null;
-    var hdr = (L[0] === 'OFF' ? L[1] : L[0].slice(3)).trim().split(/\s+/);
-    var start = (L[0] === 'OFF' ? 2 : 1);
-    var nv = +hdr[0], nf = +hdr[1];
-    var mesh = new M.Mesh([], []), i;
-    for (i = 0; i < nv; i++) {
-      var p = L[start + i].split(/\s+/);
-      mesh.verts.push(v3(+p[0], +p[1], +p[2]));
-    }
-    for (i = 0; i < nf; i++) {
-      var q = L[start + nv + i].split(/\s+/);
-      var n = +q[0], f = [];
-      for (var k = 1; k <= n; k++) f.push(+q[k]);
-      if (f.length >= 3) mesh.faces.push(f);
-    }
-    return mesh.clean();
-  }
+
 
   /* ============================================================
      CAM — estado del proyecto

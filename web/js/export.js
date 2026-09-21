@@ -464,6 +464,60 @@
     return out;
   };
 
+  /* Lectura de un ZIP (la usan los formatos empaquetados: 3MF y, de
+     rebote, cualquier otro que llegue comprimido).  Se recorre el
+     directorio central, que es lo único fiable: los tamaños del
+     encabezado local pueden venir a cero cuando el archivo se escribió
+     en streaming.  Devuelve [{name, data:Uint8Array}]. */
+  X.unzip = async function (buf) {
+    var u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    var eocd = -1;
+    for (var i = u8.length - 22; i >= 0 && i > u8.length - 66000; i--)
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('no parece un archivo ZIP');
+    var n = dv.getUint16(eocd + 10, true);
+    var cdOff = dv.getUint32(eocd + 16, true);
+    var dec = new TextDecoder('utf-8');
+    var out = [], q = cdOff;
+    for (var k = 0; k < n && q + 46 <= u8.length; k++) {
+      if (dv.getUint32(q, true) !== 0x02014b50) break;
+      var metodo = dv.getUint16(q + 10, true);
+      var comp = dv.getUint32(q + 20, true);
+      var crudo = dv.getUint32(q + 24, true);
+      var nl = dv.getUint16(q + 28, true), el = dv.getUint16(q + 30, true), cl = dv.getUint16(q + 32, true);
+      var lo = dv.getUint32(q + 42, true);
+      var nombre = dec.decode(u8.subarray(q + 46, q + 46 + nl));
+      q += 46 + nl + el + cl;
+      if (lo + 30 > u8.length || dv.getUint32(lo, true) !== 0x04034b50) continue;
+      var lnl = dv.getUint16(lo + 26, true), lel = dv.getUint16(lo + 28, true);
+      var ini = lo + 30 + lnl + lel;
+      var cuerpo = u8.subarray(ini, ini + comp);
+      var datos;
+      if (metodo === 0) datos = cuerpo.slice();
+      else if (metodo === 8) datos = await inflaRaw(cuerpo, crudo);
+      else continue;                      /* método no soportado */
+      out.push({ name: nombre, data: datos });
+    }
+    return out;
+  };
+  async function inflaRaw(bytes, tam) {
+    if (typeof DecompressionStream === 'undefined')
+      throw new Error('este navegador no sabe descomprimir el archivo');
+    var ds = new DecompressionStream('deflate-raw');
+    var w = ds.writable.getWriter();
+    w.write(bytes); w.close();
+    var trozos = [], total = 0, r = ds.readable.getReader();
+    for (;;) {
+      var paso = await r.read();
+      if (paso.done) break;
+      trozos.push(paso.value); total += paso.value.length;
+    }
+    var res = new Uint8Array(tam && tam > 0 ? Math.max(tam, total) : total), o = 0;
+    trozos.forEach(function (t) { res.set(t, o); o += t.length; });
+    return total === res.length ? res : res.subarray(0, total);
+  }
+
   /* ------------------------------------------------------------
      Entrega del archivo al usuario
      ------------------------------------------------------------ */

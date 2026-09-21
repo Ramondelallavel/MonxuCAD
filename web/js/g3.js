@@ -518,6 +518,24 @@
               (Math.abs(q.x - p2.x) < EPSD && Math.abs(q.y - p2.y) < EPSD)) continue;
           /* estrictamente dentro: los que caen en el borde tampoco estorban */
           if (cr(p0, p1, q) > EPSA && cr(p1, p2, q) > EPSA && cr(p2, p0, q) > EPSA) { bad = true; break; }
+          /* salvo si caen justo sobre la diagonal que va a quedar: por ahí
+             el contorno se mete dentro de la oreja aunque el vértice esté
+             en el borde, y el corte taparía lo que hay al otro lado */
+          if (Math.abs(cr(p0, q, p2)) <= EPSA && entreDos(p0, p2, q)) { bad = true; break; }
+        }
+        if (!bad) {
+          /* La diagonal que deja la oreja tiene que ser una diagonal de
+             verdad: no puede cruzar ninguna arista del contorno.  Mirar
+             sólo si hay vértices dentro vale en un polígono simple, y el
+             de una tapa con agujeros no lo es —el puente que une cada
+             agujero al contorno exterior lo hace tocarse consigo mismo—,
+             así que sin esta prueba el reparto llega a tapar el agujero. */
+          for (j = 0; j < m; j++) {
+            var ja = idx[j], jb = idx[(j + 1) % m];
+            if (ja === i0 || ja === i1 || ja === i2) continue;
+            if (jb === i0 || jb === i1 || jb === i2) continue;
+            if (cruzaDiag(p0, p2, flat[ja], flat[jb])) { bad = true; break; }
+          }
         }
         if (bad) continue;
         /* de todas las orejas válidas se corta la más "gorda": produce
@@ -576,6 +594,21 @@
     return tri;
   }
   function dist2(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
+  /* ¿q cae dentro del segmento a-b (sin contar los extremos)? */
+  function entreDos(a, b, q) {
+    var dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+    if (L2 < 1e-24) return false;
+    var t = ((q.x - a.x) * dx + (q.y - a.y) * dy) / L2;
+    return t > 1e-9 && t < 1 - 1e-9;
+  }
+  /* cruce propio de dos segmentos: los extremos compartidos o apoyados no
+     cuentan, sólo el que atraviesa de un lado a otro */
+  function cruzaDiag(a, b, c, d) {
+    function s(o, p, q) { return (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x); }
+    var d1 = s(a, b, c), d2 = s(a, b, d), d3 = s(c, d, a), d4 = s(c, d, b);
+    if (d1 === 0 || d2 === 0 || d3 === 0 || d4 === 0) return false;
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  }
 
   /* ---------- Muestreo de curvas 2D del dibujo hacia 3D ---------- */
   G3.arcPoints = function (cx, cy, r, a0, a1, seg) {
