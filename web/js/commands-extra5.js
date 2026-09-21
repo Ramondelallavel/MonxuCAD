@@ -578,22 +578,40 @@
     });
     if (!bb) { ctx.err('No se pudo calcular la extensión.'); return; }
     var dx = bb.x2 - bb.x1, dy = bb.y2 - bb.y1, dz = bb.z2 - bb.z1;
+    var cx = (bb.x1 + bb.x2) / 2, cy = (bb.y1 + bb.y2) / 2, cz = (bb.z1 + bb.z2) / 2;
     var d = num(sep) && sep > 0 ? sep : Math.max(dx, dy, dz) * 0.35 + 1;
+    /* Los ejes de cada vista son los de la norma, no una perpendicular
+       cualquiera: con G3.perp el alzado y el perfil salían girados y de
+       un tamaño que no era el de la pieza.  Y las vistas van alineadas:
+       el alzado debajo de la planta compartiendo la X, y el perfil a la
+       derecha del alzado compartiendo la altura. */
+    var bajada = (dy + dz) / 2 + d;
     var vistas = [
-      { n: 'Planta',  z: v3(0, 0, 1),  o: { x: 0, y: 0 } },
-      { n: 'Alzado',  z: v3(0, -1, 0), o: { x: 0, y: -(dy + dz) / 2 - d } },
-      { n: 'Perfil',  z: v3(1, 0, 0),  o: { x: (dx + dy) / 2 + d, y: 0 } }
+      { n: 'Planta', z: v3(0, 0, 1),  x: v3(1, 0, 0), y: v3(0, 1, 0),
+        cu: cx, cv: cy, o: { x: 0, y: 0 } },
+      { n: 'Alzado', z: v3(0, -1, 0), x: v3(1, 0, 0), y: v3(0, 0, 1),
+        cu: cx, cv: cz, o: { x: 0, y: -bajada } },
+      { n: 'Perfil', z: v3(1, 0, 0),  x: v3(0, 1, 0), y: v3(0, 0, 1),
+        cu: cy, cv: cz, o: { x: (dx + dy) / 2 + d, y: -bajada } }
     ];
     var total = 0;
     vistas.forEach(function (v) {
-      var z = G3.norm(v.z), x = G3.perp(z), y = G3.cross(z, x);
+      var hechas = {};
       sol.forEach(function (ent) {
         var mesh = S.meshOf(ent); if (!mesh) return;
-        M.silhouette(mesh, z, false).forEach(function (ed) {
+        M.silhouette(mesh, v.z, false).forEach(function (ed) {
           var a = mesh.verts[ed[0]], b = mesh.verts[ed[1]];
-          var pa = { x: base.x + v.o.x + G3.dot(a, x), y: base.y + v.o.y + G3.dot(a, y) };
-          var pb = { x: base.x + v.o.x + G3.dot(b, x), y: base.y + v.o.y + G3.dot(b, y) };
+          var pa = { x: base.x + v.o.x + G3.dot(a, v.x) - v.cu,
+                     y: base.y + v.o.y + G3.dot(a, v.y) - v.cv };
+          var pb = { x: base.x + v.o.x + G3.dot(b, v.x) - v.cu,
+                     y: base.y + v.o.y + G3.dot(b, v.y) - v.cv };
           if (G.dist(pa, pb) < 1e-9) return;
+          /* al proyectar, muchas aristas caen una encima de otra */
+          var k1 = pa.x.toFixed(5) + ',' + pa.y.toFixed(5);
+          var k2 = pb.x.toFixed(5) + ',' + pb.y.toFixed(5);
+          var k = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
+          if (hechas[k]) return;
+          hechas[k] = 1;
           ctx.doc.add(E.line(pa, pb, { layer: ctx.doc.vars.CLAYER }));
           total++;
         });
