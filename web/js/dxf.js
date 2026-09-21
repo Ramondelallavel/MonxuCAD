@@ -35,8 +35,25 @@
     return s;
   }
   Writer.prototype.pt = function (base, p, z) {
-    this.p(base, p.x); this.p(base + 10, p.y); this.p(base + 20, z || 0);
+    /* Un punto que falta no puede tumbar la exportación entera */
+    var x = p && isFinite(p.x) ? p.x : 0, y = p && isFinite(p.y) ? p.y : 0;
+    if (z === undefined && p && isFinite(p.z)) z = p.z;
+    this.p(base, x); this.p(base + 10, y); this.p(base + 20, z || 0);
     return this;
+  };
+
+  /* Un objeto con datos incompletos no debe echar a perder el archivo
+     entero: se descarta él solo y se corta lo que hubiera escrito a
+     medias, para que el DXF no quede partido. */
+  Writer.prototype.seguro = function (fn) {
+    var n = this.out.length;
+    try { fn(); return true; }
+    catch (err) {
+      this.out.length = n;
+      this.saltados = (this.saltados || 0) + 1;
+      this.motivo = err && err.message;
+      return false;
+    }
   };
   Writer.prototype.text = function () { return this.out.join('\r\n') + '\r\n'; };
 
@@ -449,6 +466,35 @@
   /* -------- Cotas: bloque anónimo + entidad DIMENSION -------- */
   var DIMTYPE = { linear: 0, rotated: 0, aligned: 1, angular: 2, diameter: 3, radius: 4, arclen: 2, ordinate: 6 };
 
+  /* Directriz: hasta ahora se descomponía en rectas y un triángulo al
+     exportar, así que al volver a abrir el archivo ya no era una
+     directriz.  LEADER es una entidad de la norma; se escribe tal cual y
+     el texto que la acompaña va detrás como MTEXT. */
+  Writer.prototype.leader = function (ent, doc, owner) {
+    var W = this;
+    var pts = ent.pts || [];
+    if (pts.length < 2) return;
+    W.entHead('LEADER', ent, doc, owner, 'AcDbLeader');
+    W.p(3, ent.style || 'ISO-25');
+    W.p(71, 1);                       /* con punta de flecha */
+    W.p(72, 0);                       /* trazado recto */
+    W.p(73, 3);                       /* sin anotación asociada */
+    W.p(40, ent.h || 2.5);
+    W.p(41, 0);
+    W.p(76, pts.length);
+    for (var i = 0; i < pts.length; i++) W.pt(10, pts[i]);
+    if (ent.text) {
+      var fin = pts[pts.length - 1];
+      var t = E.mtext({ x: fin.x + (ent.h || 2.5) * 0.4, y: fin.y + (ent.h || 2.5) * 0.4 },
+                      ent.h || 2.5, ent.text, 0,
+                      { layer: ent.layer, color: ent.color, ltype: ent.ltype, lw: ent.lw });
+      W.entity(t, doc, owner);
+      /* marca para que al volver a leerlo se enganche a su directriz en
+         vez de quedar como un texto suelto; otros programas la ignoran */
+      W.p(1001, 'MONXUCAD'); W.p(1000, 'DIRECTRIZ');
+    }
+  };
+
   Writer.prototype.dimension = function (ent, doc, owner, blockName) {
     var W = this;
     var st = CAD.Dim.style(ent, doc);
@@ -459,9 +505,21 @@
     if (ent.color !== undefined && ent.color !== 256) W.p(62, ent.color | 0);
     if (W.r2000) W.p(100, 'AcDbDimension');
     W.p(2, blockName);
-    var defPt = ent.p3 || ent.p1 || { x: 0, y: 0 };
+    /* El punto 10 significa una cosa distinta en cada clase de cota; la
+       norma lo fija así y otros programas cuentan con ello. */
+    var cen = ent.center || { x: 0, y: 0 };
+    var defPt;
+    switch (ent.kind) {
+      case 'radius': defPt = cen; break;
+      /* en un diámetro, el 10 es el punto opuesto al 15 por el centro */
+      case 'diameter': defPt = ent.p1
+        ? { x: 2 * cen.x - ent.p1.x, y: 2 * cen.y - ent.p1.y } : cen; break;
+      case 'angular': case 'arclen': defPt = ent.p3 || cen; break;
+      case 'ordinate': defPt = ent.p1 || { x: 0, y: 0 }; break;
+      default: defPt = ent.dimLine || ent.textPos || ent.p2 || ent.p1 || { x: 0, y: 0 };
+    }
     W.pt(10, defPt);
-    var tp = (geo.texts[0] && geo.texts[0].p) || defPt;
+    var tp = ent.textPos || (geo.texts[0] && geo.texts[0].p) || defPt;
     W.pt(11, tp);
     var typ = DIMTYPE[ent.kind] === undefined ? 0 : DIMTYPE[ent.kind];
     W.p(70, typ + 32 + (ent.textPos ? 128 : 0));
@@ -489,13 +547,20 @@
         break;
       case 'angular': case 'arclen':
         if (W.r2000) W.p(100, 'AcDb3PointAngularDimension');
-        W.pt(13, ent.p1); W.pt(14, ent.p2); W.pt(15, ent.center); W.pt(16, ent.p3);
+        W.pt(13, ent.p1); W.pt(14, ent.p2); W.pt(15, cen); W.pt(16, ent.p3 || defPt);
         break;
       case 'ordinate':
         if (W.r2000) W.p(100, 'AcDbOrdinateDimension');
-        W.pt(13, ent.p1); W.pt(14, ent.p2);
+        W.pt(13, ent.p1); W.pt(14, ent.p2 || ent.textPos || ent.p1);
         break;
     }
+    /* La norma no distingue una cota de longitud de arco de una angular
+       de tres puntos, y el sentido de la ordenada tampoco viaja.  Se
+       anota aparte, en datos extendidos: otros programas los ignoran y
+       MonxuCAD recupera la cota tal cual estaba. */
+    W.p(1001, 'MONXUCAD');
+    W.p(1000, String(ent.kind || 'linear'));
+    if (ent.kind === 'ordinate') W.p(1070, ent.ordX ? 1 : 0);
   };
 
   /* ============================================================
@@ -513,7 +578,9 @@
       if (e.type === 'DIMENSION') {
         dimIdx++;
         var name = '*D' + dimIdx;
-        dimBlocks.push({ name: name, ent: e, geo: CAD.Dim.explode(e, doc) });
+        var geo = [];
+        try { geo = CAD.Dim.explode(e, doc) || []; } catch (err) { geo = []; }
+        dimBlocks.push({ name: name, ent: e, geo: geo });
       }
     });
 
@@ -704,12 +771,13 @@
     var owner = r2000 ? handles.modelRec : null;
     var di = 0;
     doc.entities.forEach(function (e) {
-      if (e.type === 'DIMENSION') { di++; W.dimension(e, doc, owner, '*D' + di); return; }
-      if (e.type === 'LEADER') {
-        CAD.Dim.explode(e, doc).forEach(function (g) { W.entity(g, doc, owner); });
+      if (e.type === 'DIMENSION') {
+        di++;
+        W.seguro(function () { W.dimension(e, doc, owner, '*D' + di); });
         return;
       }
-      W.entity(e, doc, owner);
+      if (e.type === 'LEADER') { W.seguro(function () { W.leader(e, doc, owner); }); return; }
+      W.seguro(function () { W.entity(e, doc, owner); });
     });
     W.p(0, 'ENDSEC');
 
@@ -728,6 +796,8 @@
     }
 
     W.p(0, 'EOF');
+    DXF.saltados = W.saltados || 0;
+    DXF.motivo = W.motivo || '';
     return W.text();
   };
 
@@ -750,8 +820,11 @@
     W.p(1, '');
     ents.forEach(function (e) {
       if (e.type === 'DIMENSION' || e.type === 'LEADER') {
-        CAD.Dim.explode(e, doc).forEach(function (g) { W.entity(g, doc, recHandle); });
-      } else W.entity(e, doc, recHandle);
+        if (e.type === 'LEADER') W.seguro(function () { W.leader(e, doc, recHandle); });
+        else W.seguro(function () {
+          CAD.Dim.explode(e, doc).forEach(function (g) { W.entity(g, doc, recHandle); });
+        });
+      } else W.seguro(function () { W.entity(e, doc, recHandle); });
     });
     W.p(0, 'ENDBLK');
     if (W.r2000) {
@@ -1057,7 +1130,23 @@
            ese objeto que el dibujo entero. */
         if (Array.isArray(ent)) {
           ent.forEach(function (x) { if (sano(x, warnings)) out.push(x); });
-        } else if (sano(ent, warnings)) out.push(ent);
+        } else if (sano(ent, warnings)) {
+          var ult = out.length ? out[out.length - 1] : null;
+          /* Un atributo pertenece al INSERT que lo precede; suelto se
+             queda como texto para que al menos se vea. */
+          if (ent.type === 'ATTRIB') {
+            if (ult && ult.type === 'INSERT') {
+              if (!ult.attribs) ult.attribs = [];
+              ult.attribs.push(ent);
+            } else {
+              var tx = E.text(ent.p, ent.h, ent.text, ent.rot, { layer: ent.layer, color: ent.color });
+              tx.style = ent.style; tx.halign = ent.halign; tx.valign = ent.valign;
+              out.push(tx);
+            }
+          } else if (ent.__dirTexto && ult && ult.type === 'LEADER') {
+            ult.text = ent.text; ult.h = ent.h;
+          } else out.push(ent);
+        }
       } else if (type !== 'SEQEND' && type !== 'VERTEX' && warnings) {
         if (warnings.indexOf(type) < 0 && warnings.length < 12) warnings.push(type);
       }
@@ -1114,6 +1203,12 @@
           G.rad(get(codes, 50, 0)), G.rad(get(codes, 51, 90)), o);
       case 'POINT':
         return E.point({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, o);
+      case 'XLINE': case 'RAY': {
+        var dr = { x: get(codes, 11, 1), y: get(codes, 21, 0) };
+        if (!dr.x && !dr.y) dr = { x: 1, y: 0 };
+        var org = { x: get(codes, 10, 0), y: get(codes, 20, 0) };
+        return type === 'XLINE' ? E.xline(org, dr, o) : E.ray(org, dr, o);
+      }
       case 'ELLIPSE':
         return E.ellipse({ x: get(codes, 10, 0), y: get(codes, 20, 0) },
           { x: get(codes, 11, 1), y: get(codes, 21, 0) }, get(codes, 40, 1),
@@ -1181,6 +1276,10 @@
         return te;
       }
       case 'MTEXT': {
+        var mx = getAll(codes, 1001), mk = getAll(codes, 1000);
+        var esDir = false;
+        for (var mi = 0; mi < mx.length; mi++)
+          if (String(mx[mi]) === 'MONXUCAD' && String(mk[mi]) === 'DIRECTRIZ') esDir = true;
         var chunks = getAll(codes, 3).join('') + String(get(codes, 1, ''));
         var mt = E.mtext({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
           unescapeTxt(chunks), get(codes, 41, 0), o);
@@ -1189,6 +1288,7 @@
         var rx = get(codes, 11, undefined);
         mt.rot = rx !== undefined && get(codes, 50, undefined) === undefined
           ? Math.atan2(get(codes, 21, 0), rx) : G.rad(get(codes, 50, 0));
+        if (esDir) mt.__dirTexto = true;
         return mt;
       }
       case 'INSERT': {
@@ -1247,14 +1347,56 @@
         return ha2;
       }
       case 'DIMENSION': {
-        /* se importa como referencia al bloque de geometría generado */
-        var bn = String(get(codes, 2, ''));
-        if (bn && doc.blocks[bn]) {
-          var ie = E.insert(bn, { x: 0, y: 0 }, o);
-          ie.__dim = true;
-          return ie;
+        /* Se reconstruye la cota de verdad, no una referencia al bloque
+           de geometría: así se puede seguir editando y sigue midiendo
+           sola.  El tipo viene del código 70 y, cuando lo hay, de los
+           datos extendidos que escribe MonxuCAD. */
+        var flags = get(codes, 70, 0) | 0;
+        var base = flags & 15;
+        var KIND = { 0: 'linear', 1: 'aligned', 2: 'angular', 3: 'diameter',
+                     4: 'radius', 5: 'angular', 6: 'ordinate', 7: 'arclen' };
+        var kind = KIND[base] || 'linear';
+        var xs = getAll(codes, 1001), xk = getAll(codes, 1000);
+        for (var xi = 0; xi < xs.length; xi++)
+          if (String(xs[xi]) === 'MONXUCAD' && xk[xi] !== undefined) {
+            var kk = String(xk[xi]);
+            if (/^(linear|rotated|aligned|angular|radius|diameter|arclen|ordinate)$/.test(kk)) kind = kk;
+          }
+        var P = function (c) { return { x: get(codes, c, 0), y: get(codes, c + 10, 0) }; };
+        var tiene = function (c) { return get(codes, c, undefined) !== undefined; };
+        var d10 = P(10), d11 = P(11), d13 = P(13), d14 = P(14), d15 = P(15), d16 = P(16);
+        var dm = E.dim(kind, o);
+        dm.style = String(get(codes, 3, 'ISO-25'));
+        var ov = get(codes, 1, undefined);
+        if (ov !== undefined && String(ov)) dm.textOverride = String(ov);
+        if (tiene(11)) dm.textPos = d11;
+        switch (kind) {
+          case 'linear': case 'rotated':
+            dm.p1 = d13; dm.p2 = d14; dm.rot = G.rad(get(codes, 50, 0));
+            dm.dimLine = tiene(10) ? d10 : d11;
+            break;
+          case 'aligned':
+            dm.p1 = d13; dm.p2 = d14; dm.dimLine = tiene(10) ? d10 : d11;
+            break;
+          case 'radius':
+            dm.center = d10; dm.p1 = tiene(15) ? d15 : d10;
+            break;
+          case 'diameter':
+            dm.center = { x: (d10.x + d15.x) / 2, y: (d10.y + d15.y) / 2 };
+            dm.p1 = tiene(15) ? d15 : d10;
+            break;
+          case 'angular': case 'arclen':
+            dm.center = d15; dm.p1 = d13; dm.p2 = d14; dm.p3 = tiene(16) ? d16 : d10;
+            break;
+          case 'ordinate': {
+            dm.p1 = d13; dm.p2 = tiene(14) ? d14 : d11;
+            var xo = getAll(codes, 1070);
+            dm.ordX = xo.length ? !!xo[0] : Math.abs(dm.p2.y - dm.p1.y) > Math.abs(dm.p2.x - dm.p1.x);
+            break;
+          }
         }
-        return null;
+        try { CAD.Dim.build(dm, doc); } catch (err) { }
+        return dm;
       }
       case 'LEADER': {
         var lx = getAll(codes, 10), ly = getAll(codes, 20);
@@ -1277,11 +1419,15 @@
         return ad;
       }
       case 'ATTRIB': {
-        /* se importa como texto: conserva el aspecto sin depender del INSERT */
-        var av = E.text({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
-          unescapeTxt(String(get(codes, 1, ''))), G.rad(get(codes, 50, 0)), o);
+        /* Atributo de verdad: quien lo lee lo engancha a su INSERT.  Si
+           llega suelto, el lector lo convierte en texto para que al menos
+           se vea. */
+        var av = E.attrib({ x: get(codes, 10, 0), y: get(codes, 20, 0) }, get(codes, 40, 2.5),
+          String(get(codes, 2, '')), unescapeTxt(String(get(codes, 1, ''))), o);
+        av.rot = G.rad(get(codes, 50, 0));
         av.style = String(get(codes, 7, 'Standard'));
         av.halign = get(codes, 72, 0); av.valign = get(codes, 74, 0);
+        av.flags = get(codes, 70, 0);
         if (av.halign || av.valign) {
           var q2 = { x: get(codes, 11, undefined), y: get(codes, 21, undefined) };
           if (q2.x !== undefined) av.p = q2;
