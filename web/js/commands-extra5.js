@@ -595,8 +595,9 @@
         cu: cy, cv: cz, o: { x: (dx + dy) / 2 + d, y: -bajada } }
     ];
     var total = 0;
+    var tol = Math.max(dx, dy, dz) * 1e-4 + 1e-9;
     vistas.forEach(function (v) {
-      var hechas = {};
+      var hechas = {}, segs = [];
       sol.forEach(function (ent) {
         var mesh = S.meshOf(ent); if (!mesh) return;
         M.silhouette(mesh, v.z, false).forEach(function (ed) {
@@ -607,18 +608,69 @@
                      y: base.y + v.o.y + G3.dot(b, v.y) - v.cv };
           if (G.dist(pa, pb) < 1e-9) return;
           /* al proyectar, muchas aristas caen una encima de otra */
-          var k1 = pa.x.toFixed(5) + ',' + pa.y.toFixed(5);
-          var k2 = pb.x.toFixed(5) + ',' + pb.y.toFixed(5);
+          var k1 = clave(pa), k2 = clave(pb);
           var k = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
           if (hechas[k]) return;
           hechas[k] = 1;
-          ctx.doc.add(E.line(pa, pb, { layer: ctx.doc.vars.CLAYER }));
-          total++;
+          segs.push([pa, pb]);
         });
+      });
+      encadena(segs).forEach(function (ch) {
+        var pts = G.simplify(ch.pts, tol);
+        if (ch.closed && pts.length > 2 && G.dist(pts[0], pts[pts.length - 1]) < tol) pts.pop();
+        if (pts.length < 2) return;
+        if (pts.length === 2) ctx.doc.add(E.line(pts[0], pts[1], { layer: ctx.doc.vars.CLAYER }));
+        else ctx.doc.add(E.pline(pts, !!ch.closed, { layer: ctx.doc.vars.CLAYER }));
+        total++;
       });
     });
     ctx.app.refresh(true);
-    ctx.out('Planta, alzado y perfil generados: ' + total + ' líneas.');
+    ctx.out('Planta, alzado y perfil generados: ' + total + ' objeto(s).');
+
+    function clave(q) { return q.x.toFixed(5) + ',' + q.y.toFixed(5); }
+
+    /* Las aristas de silueta salen sueltas, una por faceta.  Se enhebran
+       en cadenas y se simplifican: donde había quinientas rectas queda
+       una polilínea, que es con lo que se puede acotar y editar. */
+    function encadena(segs) {
+      var enP = {};
+      segs.forEach(function (sg, i) {
+        (enP[clave(sg[0])] || (enP[clave(sg[0])] = [])).push(i);
+        (enP[clave(sg[1])] || (enP[clave(sg[1])] = [])).push(i);
+      });
+      var usado = new Array(segs.length).fill(false), out = [];
+      function sigue(desde, i0) {
+        var pts = [desde], v = desde, n = 0;
+        while (n++ <= segs.length) {
+          var lista = (enP[clave(v)] || []).filter(function (q) { return !usado[q]; });
+          if (lista.length !== 1 && !(n === 1 && lista.length)) break;
+          var q2 = lista[0];
+          usado[q2] = true;
+          var sg = segs[q2];
+          v = clave(sg[0]) === clave(v) ? sg[1] : sg[0];
+          pts.push(v);
+        }
+        return pts;
+      }
+      /* primero las cadenas que arrancan en un extremo libre */
+      for (var k in enP) {
+        if (enP[k].length !== 1) continue;
+        var i0 = enP[k][0];
+        if (usado[i0]) continue;
+        var sg0 = segs[i0];
+        var ini = clave(sg0[0]) === k ? sg0[0] : sg0[1];
+        var pts = sigue(ini, i0);
+        if (pts.length > 1) out.push({ pts: pts, closed: false });
+      }
+      /* y luego los bucles que quedan */
+      for (var i = 0; i < segs.length; i++) {
+        if (usado[i]) continue;
+        var pts2 = sigue(segs[i][0], i);
+        if (pts2.length > 1)
+          out.push({ pts: pts2, closed: G.dist(pts2[0], pts2[pts2.length - 1]) < 1e-9 });
+      }
+      return out;
+    }
   });
 
 })();
