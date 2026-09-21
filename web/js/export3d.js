@@ -591,15 +591,21 @@
       var t = lines[i].trim();
       if (!t || t[0] === '#') continue;
       var p = t.split(/\s+/);
-      if (p[0] === 'v') mesh.verts.push(G3.v(+p[1], +p[2], +p[3]));
-      else if (p[0] === 'f') {
-        var f = [];
+      if (p[0] === 'v') {
+        var vx = +p[1], vy = +p[2], vz = +p[3];
+        if (!isFinite(vx) || !isFinite(vy) || !isFinite(vz)) continue;
+        mesh.verts.push(G3.v(vx, vy, vz));
+      } else if (p[0] === 'f') {
+        var f = [], roto = false;
         for (var j = 1; j < p.length; j++) {
           var k = parseInt(p[j].split('/')[0], 10);
           if (!k) continue;
-          f.push(k > 0 ? k - 1 : mesh.verts.length + k);
+          var idx = k > 0 ? k - 1 : mesh.verts.length + k;
+          /* un índice fuera de la lista tumbaba la lectura entera */
+          if (idx < 0 || idx >= mesh.verts.length) { roto = true; break; }
+          f.push(idx);
         }
-        if (f.length >= 3) mesh.faces.push(f);
+        if (!roto && f.length >= 3) mesh.faces.push(f);
       }
     }
     return mesh.verts.length ? mesh.clean() : null;

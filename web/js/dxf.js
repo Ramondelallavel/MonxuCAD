@@ -1012,6 +1012,33 @@
   }
 
   /* Lee un rango de entidades */
+  /* Comprueba que un objeto recién leído tiene números utilizables.
+     Lo que se puede arreglar sin inventar nada (un radio negativo es el
+     mismo círculo) se arregla; lo demás se descarta. */
+  var LIM = 1e14;
+  function numOk(v) { return typeof v !== 'number' || (isFinite(v) && Math.abs(v) < LIM); }
+  function sano(ent, warnings) {
+    if (!ent || !ent.type) return false;
+    if (typeof ent.r === 'number') {
+      if (!isFinite(ent.r)) return false;
+      if (ent.r < 0) ent.r = -ent.r;
+    }
+    if (typeof ent.h === 'number' && (!isFinite(ent.h) || ent.h <= 0)) return false;
+    var mal = false, visto = [];
+    (function anda(o, hondo) {
+      if (mal || !o || typeof o !== 'object' || hondo > 4 || visto.indexOf(o) >= 0) return;
+      visto.push(o);
+      for (var k in o) {
+        if (k.charAt(0) === '_') continue;
+        var v = o[k];
+        if (typeof v === 'number') { if (!numOk(v)) { mal = true; return; } }
+        else if (v && typeof v === 'object') anda(v, hondo + 1);
+      }
+    })(ent, 0);
+    if (mal && warnings && warnings.indexOf('(coordenadas no válidas)') < 0) warnings.push('(coordenadas no válidas)');
+    return !mal;
+  }
+
   function readEntities(pairs, from, to, doc, warnings) {
     var out = [], i = from;
     while (i < to) {
@@ -1024,8 +1051,13 @@
       var ent = null;
       try { ent = buildEntity(type, d._codes, pairs, i, to, doc); } catch (err) { ent = null; }
       if (ent) {
-        if (Array.isArray(ent)) { ent.forEach(function (x) { out.push(x); }); }
-        else out.push(ent);
+        /* Un archivo de otro programa puede venir con coordenadas rotas.
+           Dejar entrar un NaN o un infinito envenena la extensión del
+           dibujo: ZOOM deja de funcionar y no se ve nada.  Mejor perder
+           ese objeto que el dibujo entero. */
+        if (Array.isArray(ent)) {
+          ent.forEach(function (x) { if (sano(x, warnings)) out.push(x); });
+        } else if (sano(ent, warnings)) out.push(ent);
       } else if (type !== 'SEQEND' && type !== 'VERTEX' && warnings) {
         if (warnings.indexOf(type) < 0 && warnings.length < 12) warnings.push(type);
       }
