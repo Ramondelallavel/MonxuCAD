@@ -674,38 +674,46 @@
       }
       if (!sel) return;
       if (mode !== 'diff' && sel.length < 2) { ctx.err('Se necesitan al menos dos sólidos.'); return; }
-      ctx.doc.mark(label);
-      var t0 = performance.now();
-      var all = mode === 'diff' ? sel.a.concat(sel.b) : sel;
-      var first = mode === 'diff' ? sel.a[0] : sel[0];
-
-      /* El resultado guarda el árbol de operandos, no una malla cocida:
-         así se puede volver atrás, cambiar el radio de un taladro o
-         suprimir una operación y que la pieza se reconstruya sola. */
-      var e = S.solid({ op: 'bool', kind: mode,
-                        nodes: all.map(function (x) { return S.nodeOf(x); }) },
-                      { layer: first.layer, color: first.color });
-      var res;
-      try { res = S.meshOf(e); }
-      catch (err) {
-        ctx.doc.discardTx();
-        ctx.err('Error en la operación booleana: ' + err.message);
-        return;
-      }
-      if (!res || !res.faces.length) {
-        ctx.doc.discardTx();
-        ctx.err('El resultado está vacío (los sólidos no se cortan).');
-        return;
-      }
-      all.forEach(function (x) { ctx.doc.remove(x); });
-      addSolid(ctx, e);
-      ctx.app.selSet = [e];
-      var chk = M.check(res);
-      ctx.out(label + ': volumen ' + G.fmt(Math.abs(res.volume()), 4) +
-              ', ' + res.faces.length + ' caras, ' + Math.round(performance.now() - t0) + ' ms' +
-              (chk.estanco ? '' : '  (aviso: la malla queda abierta)'));
+      CAD.bool3d(ctx, mode, label, mode === 'diff' ? sel.a : sel, mode === 'diff' ? sel.b : null);
     });
   }
+
+  /* El booleano de sólidos, aparte, para que también puedan usarlo los
+     comandos UNION / DIFERENCIA / INTERSEC —los que uno teclea— cuando lo
+     designado son sólidos y no regiones, como en AutoCAD. */
+  CAD.bool3d = function (ctx, mode, label, a, b) {
+    ctx.doc.mark(label);
+    var t0 = performance.now();
+    var all = b ? a.concat(b) : a;
+    var first = a[0];
+
+    /* El resultado guarda el árbol de operandos, no una malla cocida:
+       así se puede volver atrás, cambiar el radio de un taladro o
+       suprimir una operación y que la pieza se reconstruya sola. */
+    var e = S.solid({ op: 'bool', kind: mode,
+                      nodes: all.map(function (x) { return S.nodeOf(x); }) },
+                    { layer: first.layer, color: first.color });
+    var res;
+    try { res = S.meshOf(e); }
+    catch (err) {
+      ctx.doc.discardTx();
+      ctx.err('Error en la operación booleana: ' + err.message);
+      return false;
+    }
+    if (!res || !res.faces.length) {
+      ctx.doc.discardTx();
+      ctx.err('El resultado está vacío (los sólidos no se cortan).');
+      return false;
+    }
+    all.forEach(function (x) { ctx.doc.remove(x); });
+    addSolid(ctx, e);
+    ctx.app.selSet = [e];
+    var chk = M.check(res);
+    ctx.out(label + ': volumen ' + G.fmt(Math.abs(res.volume()), 4) +
+            ', ' + res.faces.length + ' caras, ' + Math.round(performance.now() - t0) + ' ms' +
+            (chk.estanco ? '' : '  (aviso: la malla queda abierta)'));
+    return true;
+  };
   boolCmd(['UNION3D', 'UNION3'], { group: '3d', icon: 'union', title: 'Unión de sólidos' }, 'union', 'Unión');
   boolCmd(['DIFERENCIA3D', 'SUBTRACT', 'DIFERENCIA3'], { group: '3d', icon: 'subtract', title: 'Diferencia de sólidos' }, 'diff', 'Diferencia');
   boolCmd(['INTERSEC3D', 'INTERSECT', 'INTERSEC3'], { group: '3d', icon: 'intersect', title: 'Intersección de sólidos' }, 'inter', 'Intersección');

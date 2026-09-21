@@ -255,7 +255,8 @@
 
   function boolCmd(names, op, label, prompt2) {
     Cmd.add(names, { group: 'modify', icon: 'boolean', title: label }, async function (ctx) {
-      var a = await ctx.getSelection(op === 'diff' ? 'Designe la región de la que restar' : 'Designe las regiones');
+      var a = await ctx.getSelection(op === 'diff' ? 'Designe la región o el sólido del que restar'
+                                                   : 'Designe las regiones o los sólidos');
       if (!a || !a.length) return;
       var b = a;
       if (op === 'diff') {
@@ -267,11 +268,28 @@
         return;
       }
       var doc = ctx.doc;
-      var loops = [];
       var src = op === 'diff' ? a.concat(b) : a;
+
+      /* Como en AutoCAD, UNION / DIFERENCIA / INTERSEC valen igual para
+         regiones que para sólidos.  Si lo designado son sólidos, se hace
+         el booleano de sólidos en vez de exigir contornos cerrados. */
+      var S3 = CAD.Solid;
+      var conSolidos = src.filter(function (e) { return S3 && S3.is3D(e); });
+      if (conSolidos.length && CAD.bool3d) {
+        if (conSolidos.length !== src.length) {
+          ctx.err('No se pueden mezclar sólidos y regiones en la misma operación.');
+          return;
+        }
+        if (op !== 'diff' && src.length < 2) { ctx.err('Se necesitan al menos dos sólidos.'); return; }
+        CAD.bool3d(ctx, op, label, a, op === 'diff' ? b : null);
+        ctx.app.refresh(true);
+        return;
+      }
+
+      var loops = [];
       for (var i = 0; i < src.length; i++) {
         var l = CAD.Region.loopOf(src[i], doc);
-        if (!l) { ctx.err('Todos los objetos deben ser contornos cerrados (polilínea cerrada, círculo, elipse o sombreado).'); return; }
+        if (!l) { ctx.err('Todos los objetos deben ser contornos cerrados (polilínea cerrada, círculo, elipse o sombreado) o sólidos.'); return; }
         loops.push(l);
       }
       doc.mark(label);
@@ -306,7 +324,7 @@
     });
   }
   boolCmd(['UNION', 'UNIONREG'], 'union', 'Unión');
-  boolCmd(['DIFERENCIA', 'SUBTRACT'], 'diff', 'Diferencia', 'Designe las regiones a restar');
+  boolCmd(['DIFERENCIA', 'SUBTRACT'], 'diff', 'Diferencia', 'Designe las regiones o los sólidos a restar');
   boolCmd(['INTERSEC', 'INTERSECT'], 'inter', 'Intersección');
 
   /* ============================================================
