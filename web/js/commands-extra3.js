@@ -1379,12 +1379,12 @@
        malla ya trabajada que al revés.  Con la misma pieza, de mayor a
        menor entran las nueve cadenas y de menor a mayor se quedan dos
        por el camino. */
-    var orden = cutters.slice();
-    orden.forEach(function (c) {
+    var conVol = cutters.map(function (c) {
       var malla = c && c.mesh ? c.mesh : c;
-      c.__vol = malla && malla.faces.length ? Math.abs(malla.volume()) : 0;
+      return { c: c, v: malla && malla.faces && malla.faces.length ? Math.abs(malla.volume()) : 0 };
     });
-    orden.sort(function (a, b) { return b.__vol - a.__vol; });
+    conVol.sort(function (a, b) { return b.v - a.v; });
+    var orden = conVol.map(function (x) { return x.c; });
 
     var pendientes = [];
     for (i = 0; i < orden.length; i++)

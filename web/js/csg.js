@@ -319,8 +319,12 @@
     var nivel = [];
     for (i = 0; i < piezas.length; i++) nivel.push(regDe(piezas[i]));
 
-    var guard = 0;
-    while (nivel.length > 1 && guard++ < 64) {
+    /* Un árbol que sale redondo hace n-1 fusiones.  Si se pasa de cuatro
+       veces eso es que se está atascando pareja sí, pareja también, y
+       sale más a cuenta rehacer el grupo a la antigua que seguir
+       probando combinaciones. */
+    var tope = piezas.length * 4, intentos = 0, guard = 0;
+    while (nivel.length > 1 && guard++ < 64 && intentos < tope) {
       nivel.sort(function (a, b) {
         return centroX(a) - centroX(b) || centroY(a) - centroY(b) || centroZ(a) - centroZ(b);
       });
@@ -328,6 +332,7 @@
       i = 0;
       while (i < nivel.length) {
         if (i + 1 >= nivel.length) { sig.push(nivel[i]); i++; continue; }
+        intentos++;
         var r = uneSeguro(nivel[i], nivel[i + 1]);
         /* si no se pudo fundir, esta pieza sale sola y la de al lado
            prueba suerte con la siguiente: así cambian las parejas */
