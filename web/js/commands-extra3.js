@@ -1295,12 +1295,12 @@
       var tubo = null;
       try { tubo = tuboCadena(g); } catch (e) { tubo = null; }
       if (tubo) { out.push({ mesh: tubo, suma: suma }); return; }
-      var u = g[0].mesh;
-      for (var i = 1; i < g.length; i++) {
-        try { var n2 = CSG.union(u, g[i].mesh); if (n2 && n2.faces.length) u = n2; }
-        catch (e) { out.push({ mesh: g[i].mesh, suma: suma }); }
-      }
-      out.push({ mesh: u, suma: suma });
+      /* normalmente sale una sola herramienta; si alguna fusión no se
+         pudo dar por buena salen varias, y da igual: quitar A y luego B
+         es lo mismo que quitar A∪B */
+      var trozos = CSG.unionMany(g.map(function (c) { return c.mesh; }));
+      if (!trozos || !trozos.length) trozos = g.map(function (c) { return c.mesh; });
+      trozos.forEach(function (m) { if (m && m.faces.length) out.push({ mesh: m, suma: suma }); });
     });
     return out;
   }
@@ -1316,39 +1316,98 @@
      se sigue con el anterior, que sí era válido. */
   function applyCutters(mesh, cutters, informe) {
     if (!cutters.length) return null;
-    var res = mesh, done = 0, rechazados = 0;
+    var res = mesh, done = 0, i;
     var v0 = Math.abs(mesh.volume());
     var chk0 = CAD.Mesh.check(mesh);
     var exigirCerrada = chk0.estanco;
     var noManActual = chk0.noManifold;   /* ninguna cadena puede empeorar la topología */
     var maxPorPaso = v0 * 0.25;         /* un empalme nunca mueve un cuarto de la pieza */
-    for (var i = 0; i < cutters.length; i++) {
-      var c = cutters[i];
-      var malla = c && c.mesh ? c.mesh : c;          /* admite la forma antigua */
-      var suma = !!(c && c.suma);
+
+    function aplicaSobre(pieza, malla, suma, vAntes) {
       try {
-        var vAntes = Math.abs(res.volume());
-        var next = suma ? CSG.union(res, malla) : CSG.subtract(res, malla);
-        if (!next || !next.faces.length) { rechazados++; continue; }
+        var next = suma ? CSG.union(pieza, malla) : CSG.subtract(pieza, malla);
+        if (!next || !next.faces.length) return false;
         var vDespues = Math.abs(next.volume());
-        if (!isFinite(vDespues) || vDespues <= 0) { rechazados++; continue; }
+        if (!isFinite(vDespues) || vDespues <= 0) return false;
         /* quitando material el volumen baja, rellenando un rincón sube:
            al revés es que la herramienta estaba mal colocada */
-        if (suma) { if (vDespues < vAntes - 1e-6) { rechazados++; continue; } }
-        else if (vDespues > vAntes + 1e-6) { rechazados++; continue; }
-        if (Math.abs(vDespues - vAntes) > maxPorPaso) { rechazados++; continue; }
+        if (suma) { if (vDespues < vAntes - 1e-6) return false; }
+        else if (vDespues > vAntes + 1e-6) return false;
+        if (Math.abs(vDespues - vAntes) > maxPorPaso) return false;
         var chkN = CAD.Mesh.check(next);
-        if (exigirCerrada && !chkN.estanco) { rechazados++; continue; }
+        if (exigirCerrada && !chkN.estanco) return false;
         /* Una cadena que deja aristas compartidas por más de dos caras
            rompe la pieza para exportarla y para seguir trabajándola: vale
            más dejar esa arista viva que entregar un sólido mal formado. */
-        if (chkN.noManifold > noManActual) { rechazados++; continue; }
+        if (chkN.noManifold > noManActual) return false;
         res = next;
         noManActual = chkN.noManifold;
         done++;
-      } catch (err) { rechazados++; continue; }
+        return true;
+      } catch (err) { return false; }
     }
-    if (informe) { informe.hechos = done; informe.rechazados = rechazados; informe.total = cutters.length; }
+
+    function intenta(c) {
+      var malla = c && c.mesh ? c.mesh : c;          /* admite la forma antigua */
+      if (!malla || !malla.faces || !malla.faces.length) return false;
+      var suma = !!(c && c.suma);
+      var vAntes = Math.abs(res.volume());
+      if (aplicaSobre(res, malla, suma, vAntes)) return true;
+
+      /* Segundo intento con la pieza re-teselada.  Cada booleana deja la
+         malla un poco más troceada, y a veces el recorte se atasca por
+         cómo han quedado partidas las caras, no por la herramienta:
+         fundiendo los triángulos coplanares se vuelve a un teselado
+         limpio y la misma cadena entra sin rechistar. */
+      var q = res.clone();
+      try { CSG.mergeCoplanar(q); q.clean(); q.unpinch(); } catch (e) { return false; }
+      if (!q.faces.length) return false;
+      /* No se le pide a la malla re-teselada que esté cerrada: fundir
+         coplanares puede dejarla con alguna costura y aun así servir de
+         punto de partida perfecto para el recorte.  Lo que sí se exige
+         es que no haya cambiado de volumen —si ha cambiado, se ha comido
+         geometría— y el resultado pasa después los mismos controles que
+         el del primer intento. */
+      if (Math.abs(Math.abs(q.volume()) - vAntes) > vAntes * 1e-9 + 1e-9) return false;
+      return aplicaSobre(q, malla, suma, vAntes);
+    }
+
+    /* De mayor a menor herramienta.  El orden importa más de lo que
+       parece: cada booleana deja la malla un poco más troceada, así que
+       la cadena que más material mueve conviene pasarla cuando la pieza
+       todavía está limpia; las pequeñas se acomodan mucho mejor a una
+       malla ya trabajada que al revés.  Con la misma pieza, de mayor a
+       menor entran las nueve cadenas y de menor a mayor se quedan dos
+       por el camino. */
+    var orden = cutters.slice();
+    orden.forEach(function (c) {
+      var malla = c && c.mesh ? c.mesh : c;
+      c.__vol = malla && malla.faces.length ? Math.abs(malla.volume()) : 0;
+    });
+    orden.sort(function (a, b) { return b.__vol - a.__vol; });
+
+    var pendientes = [];
+    for (i = 0; i < orden.length; i++)
+      if (!intenta(orden[i])) pendientes.push(orden[i]);
+
+    /* Una cadena puede salir mal sólo por cómo estuviera la malla en ese
+       momento —un recorte anterior le ha dejado la cara partida de otra
+       manera—.  Con el resto de los empalmes ya hechos, la misma
+       herramienta suele entrar a la primera, así que se le dan un par de
+       vueltas más antes de darla por perdida. */
+    for (var vuelta = 0; vuelta < 2 && pendientes.length; vuelta++) {
+      var quedan = [];
+      for (i = 0; i < pendientes.length; i++)
+        if (!intenta(pendientes[i])) quedan.push(pendientes[i]);
+      if (quedan.length === pendientes.length) break;   /* no se avanzó nada */
+      pendientes = quedan;
+    }
+
+    if (informe) {
+      informe.hechos = done;
+      informe.rechazados = pendientes.length;
+      informe.total = orden.length;
+    }
     return done ? res : null;
   }
 

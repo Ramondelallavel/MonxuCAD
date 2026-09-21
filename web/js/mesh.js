@@ -460,66 +460,138 @@
     return this;
   };
 
+  /* Reparación de uniones en T.
+
+     Un recorte BSP deja de vez en cuando un vértice justo en mitad de la
+     arista de la cara vecina: la grieta no se ve, pero la malla deja de
+     ser estanca y no se puede imprimir ni mecanizar.  Aquí se mete ese
+     vértice también en la cara de al lado.
+
+     Localizar las grietas es puro recuento: en una malla cerrada cada
+     arista la comparten exactamente dos caras, y un vértice metido en
+     medio deja SIEMPRE con un solo uso a las tres aristas implicadas.
+     Así que basta contar usos para saber qué aristas hay que mirar y
+     qué vértices pueden partirlas — y si no hay ninguna, se sale en el
+     acto sin tocar geometría.
+
+     Antes se rejillaba la malla entera y se recorría el tubo de cada
+     arista de cada cara contra todos los vértices, con claves de celda
+     construidas como cadenas de texto.  En un empalme de doscientos
+     prismas eso era, él solo, más de la mitad del tiempo total. */
   Mesh.prototype.fixTJunctions = function (tol) {
     tol = tol || 1e-6;
-    var V = this.verts, n = V.length, i, j;
-    if (!n) return this;
-    /* rejilla uniforme sobre los vértices */
+    var V = this.verts, n = V.length, F = this.faces, i, j, fi, f, ia, ib, k, c;
+    this.tFixes = 0;
+    if (!n || !F.length) return this;
+    /* la clave de arista empaqueta dos índices en un entero exacto */
+    if (n > 4000000) return this;
+
+    var uso = new Map();
+    for (fi = 0; fi < F.length; fi++) {
+      f = F[fi];
+      for (j = 0; j < f.length; j++) {
+        ia = f[j]; ib = f[(j + 1) % f.length];
+        if (ia === ib) continue;
+        k = ia < ib ? ia * n + ib : ib * n + ia;
+        uso.set(k, (uso.get(k) || 0) + 1);
+      }
+    }
+    var rotas = new Set(), sosp = new Uint8Array(n);
+    uso.forEach(function (veces, kk) {
+      if (veces === 2) return;
+      rotas.add(kk);
+      var a = Math.floor(kk / n);
+      sosp[a] = 1; sosp[kk - a * n] = 1;
+    });
+    if (!rotas.size) return this;      /* cerrada y sin grietas */
+
+    /* ---- rejilla uniforme, sólo con los vértices sospechosos ---- */
     var b = this.bbox();
     var diag = Math.max(1e-9, G3.boxDiag(b));
     var cell = Math.max(diag / 64, tol * 8);
+    var inv = 1 / cell, x0 = b.x1, y0 = b.y1, z0 = b.z1;
+    /* con cell >= diag/64 los índices caben de sobra en 0..64; el +2 deja
+       sitio al vecindario de radio uno sin que se solapen las claves */
     var grid = new Map();
-    function key(x, y, z) {
-      return Math.floor(x / cell) + '|' + Math.floor(y / cell) + '|' + Math.floor(z / cell);
-    }
     for (i = 0; i < n; i++) {
-      var k = key(V[i].x, V[i].y, V[i].z);
-      var a = grid.get(k); if (!a) { a = []; grid.set(k, a); }
-      a.push(i);
+      if (!sosp[i]) continue;
+      var p = V[i];
+      k = ((Math.floor((p.x - x0) * inv) + 2) * 1024 + Math.floor((p.y - y0) * inv) + 2) * 1024
+        + Math.floor((p.z - z0) * inv) + 2;
+      var a1 = grid.get(k); if (!a1) { a1 = []; grid.set(k, a1); }
+      a1.push(i);
     }
-    function near(p, q) {   /* vértices en las celdas que cubre el segmento */
-      var out = [], seen = new Set();
-      var steps = Math.max(1, Math.ceil(G3.dist(p, q) / cell) + 1);
-      for (var s = 0; s <= steps; s++) {
-        var t = s / steps;
-        var x = p.x + (q.x - p.x) * t, y = p.y + (q.y - p.y) * t, z = p.z + (q.z - p.z) * t;
+
+    var vistas = new Set(), cand = [];
+    function cerca(pa, pb) {
+      cand.length = 0; vistas.clear();
+      var pasos = Math.max(1, Math.ceil(G3.dist(pa, pb) * inv) + 1);
+      for (var s = 0; s <= pasos; s++) {
+        var t = s / pasos;
+        var cx = Math.floor((pa.x + (pb.x - pa.x) * t - x0) * inv) + 2;
+        var cy = Math.floor((pa.y + (pb.y - pa.y) * t - y0) * inv) + 2;
+        var cz = Math.floor((pa.z + (pb.z - pa.z) * t - z0) * inv) + 2;
         for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
-          var kk = Math.floor(x / cell) + dx + '|' + (Math.floor(y / cell) + dy) + '|' + (Math.floor(z / cell) + dz);
-          if (seen.has(kk)) continue; seen.add(kk);
-          var a = grid.get(kk);
-          if (a) for (var i2 = 0; i2 < a.length; i2++) out.push(a[i2]);
+          var kk = ((cx + dx) * 1024 + cy + dy) * 1024 + cz + dz;
+          if (vistas.has(kk)) continue;
+          vistas.add(kk);
+          var lst = grid.get(kk);
+          if (lst) for (var q = 0; q < lst.length; q++) cand.push(lst[q]);
         }
+      }
+    }
+
+    var VACIO = [], cache = new Map(), tol2 = tol * tol;
+    function listaPara(men, may) {          /* vértices a meter, de men a may */
+      var pa = V[men], pb = V[may];
+      var ex = pb.x - pa.x, ey = pb.y - pa.y, ez = pb.z - pa.z;
+      var L2 = ex * ex + ey * ey + ez * ez;
+      if (L2 < tol2) return VACIO;
+      cerca(pa, pb);
+      var res = [], q;
+      for (q = 0; q < cand.length; q++) {
+        var iv = cand[q];
+        if (iv === men || iv === may) continue;
+        var pv = V[iv];
+        var vx = pv.x - pa.x, vy = pv.y - pa.y, vz = pv.z - pa.z;
+        var t = (vx * ex + vy * ey + vz * ez) / L2;
+        if (t <= 1e-9 || t >= 1 - 1e-9) continue;
+        var rx = vx - ex * t, ry = vy - ey * t, rz = vz - ez * t;
+        if (rx * rx + ry * ry + rz * rz > tol2) continue;
+        res.push({ t: t, i: iv });
+      }
+      if (!res.length) return VACIO;
+      res.sort(function (u, w) { return u.t - w.t; });
+      var out = [], last = -1;
+      for (q = 0; q < res.length; q++) {
+        if (res[q].i === last) continue;
+        out.push(res[q].i); last = res[q].i;
       }
       return out;
     }
+
     var changed = 0;
-    for (var fi = 0; fi < this.faces.length; fi++) {
-      var f = this.faces[fi], nf = [];
+    for (fi = 0; fi < F.length; fi++) {
+      f = F[fi];
+      var nf = null;
       for (j = 0; j < f.length; j++) {
-        var ia = f[j], ib = f[(j + 1) % f.length];
+        ia = f[j]; ib = f[(j + 1) % f.length];
+        var ins = VACIO;
+        if (ia !== ib) {
+          var men = ia < ib ? ia : ib, may = ia < ib ? ib : ia;
+          k = men * n + may;
+          if (rotas.has(k)) {
+            ins = cache.get(k);
+            if (ins === undefined) { ins = listaPara(men, may); cache.set(k, ins); }
+          }
+        }
+        if (!ins.length) { if (nf) nf.push(ia); continue; }
+        if (!nf) nf = f.slice(0, j);
         nf.push(ia);
-        var pa = V[ia], pb = V[ib];
-        var L2 = G3.dist2(pa, pb);
-        if (L2 < tol * tol) continue;
-        var cand = near(pa, pb), ins = [];
-        for (var c = 0; c < cand.length; c++) {
-          var iv = cand[c];
-          if (iv === ia || iv === ib) continue;
-          var pv = V[iv];
-          var t = G3.dot(G3.sub(pv, pa), G3.sub(pb, pa)) / L2;
-          if (t <= 1e-9 || t >= 1 - 1e-9) continue;
-          if (G3.distToSeg(pv, pa, pb) > tol) continue;
-          ins.push({ t: t, i: iv });
-        }
-        if (!ins.length) continue;
-        ins.sort(function (x, y) { return x.t - y.t; });
-        var last = -1;
-        for (c = 0; c < ins.length; c++) {
-          if (ins[c].i === last) continue;
-          nf.push(ins[c].i); last = ins[c].i; changed++;
-        }
+        if (ia < ib) for (c = 0; c < ins.length; c++) { nf.push(ins[c]); changed++; }
+        else for (c = ins.length - 1; c >= 0; c--) { nf.push(ins[c]); changed++; }
       }
-      if (nf.length !== f.length) this.faces[fi] = nf;
+      if (nf) F[fi] = nf;
     }
     this.tFixes = changed;
     return this;

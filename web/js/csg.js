@@ -263,6 +263,104 @@
     return CSG.post(r);
   };
 
+  /* ---------- Unión de un montón de sólidos a la vez ----------
+     Encadenar `CSG.union` uno detrás de otro cuesta O(n²): cada paso
+     vuelve a construir el árbol BSP de TODA la malla acumulada para
+     recortarla contra la siguiente pieza.  Con los doscientos prismas de
+     un empalme eso eran veinticuatro segundos de reloj.
+
+     Aquí se funden en árbol —parejas, luego parejas de parejas—, de modo
+     que cada recorte trabaja contra una malla del mismo orden de tamaño
+     en vez de contra el montón entero.  Cada pasada se ordena por el
+     centro de la caja envolvente para que las parejas sean vecinas en el
+     espacio: dos piezas lejanas no comparten ni un plano, y el recorte
+     entre ellas sale casi de balde.  La unión es asociativa, así que el
+     sólido es el mismo; sólo cambia el orden en que se asocia.
+
+     Se probó a pegar sin más las parejas cuyas cajas no se tocan —su
+     unión es, literalmente, la suma de sus caras— y salía mal: al fundir
+     después dos mallas de varias piezas sueltas, el recorte BSP se
+     descuadra y entrega una herramienta abierta.  Así que aquí siempre
+     se hace la booleana de verdad, y cada fusión se acepta sólo si no
+     empeora la topología ni se inventa volumen. */
+  function regDe(m) {
+    return { m: m, b: m.bbox(), c: M.check(m), v: Math.abs(m.volume()) };
+  }
+
+  /* Une dos sólidos sólo si el resultado no sale peor que lo que entra */
+  function uneSeguro(ra, rb) {
+    var r;
+    try { r = CSG.union(ra.m, rb.m); } catch (e) { return null; }
+    if (!r || !r.faces.length) return null;
+    var rr = regDe(r);
+    if (ra.c.estanco && rb.c.estanco && !rr.c.estanco) return null;
+    if (ra.c.manifold && rb.c.manifold && !rr.c.manifold) return null;
+    /* la unión de dos sólidos ni encoge por debajo del mayor ni pasa de
+       la suma de los dos: fuera de ahí, el recorte BSP ha fallado */
+    var may = Math.max(ra.v, rb.v), tol = may * 1e-6 + 1e-12;
+    if (!isFinite(rr.v) || rr.v > ra.v + rb.v + tol || rr.v < may - tol) return null;
+    return rr;
+  }
+
+  function centroX(r) { return r.b.x1 + r.b.x2; }
+  function centroY(r) { return r.b.y1 + r.b.y2; }
+  function centroZ(r) { return r.b.z1 + r.b.z2; }
+
+  /* Devuelve una lista con el sólido resultante.  Es una lista y no un
+     sólido a secas por si alguna vez conviene entregar el grupo partido;
+     hoy siempre sale de una pieza. */
+  CSG.unionMany = function (lista) {
+    var i, piezas = [];
+    if (!lista || !lista.length) return [];
+    for (i = 0; i < lista.length; i++)
+      if (lista[i] && lista[i].faces && lista[i].faces.length) piezas.push(lista[i]);
+    if (piezas.length < 2) return piezas;
+
+    var nivel = [];
+    for (i = 0; i < piezas.length; i++) nivel.push(regDe(piezas[i]));
+
+    var guard = 0;
+    while (nivel.length > 1 && guard++ < 64) {
+      nivel.sort(function (a, b) {
+        return centroX(a) - centroX(b) || centroY(a) - centroY(b) || centroZ(a) - centroZ(b);
+      });
+      var sig = [], progreso = false;
+      i = 0;
+      while (i < nivel.length) {
+        if (i + 1 >= nivel.length) { sig.push(nivel[i]); i++; continue; }
+        var r = uneSeguro(nivel[i], nivel[i + 1]);
+        /* si no se pudo fundir, esta pieza sale sola y la de al lado
+           prueba suerte con la siguiente: así cambian las parejas */
+        if (!r) { sig.push(nivel[i]); i++; continue; }
+        sig.push(r); i += 2; progreso = true;
+      }
+      nivel = sig;
+      if (!progreso) break;
+    }
+
+    if (nivel.length === 1) return [nivel[0].m];
+
+    /* El árbol se ha atascado: alguna fusión intermedia sale mal y las
+       piezas que quedan ya no casan entre ellas.  Se rehace el grupo a
+       la antigua, uno detrás de otro y desde los prismas originales.
+       Cuesta O(n²), pero sólo se paga en los grupos que se atascan y ese
+       camino está mucho más rodado: siempre entra un prisma recién hecho
+       contra un acumulado que acaba de pasar por el post-proceso.
+       Empalmar por trozos no vale: los trozos sueltos se quedan con
+       tapas a media cara que el recorte posterior no digiere. */
+    return [enCadena(piezas)];
+  };
+
+  function enCadena(piezas) {
+    var u = piezas[0];
+    for (var i = 1; i < piezas.length; i++) {
+      var r = null;
+      try { r = CSG.union(u, piezas[i]); } catch (e) { r = null; }
+      if (r && r.faces.length) u = r;
+    }
+    return u;
+  };
+
   CSG.subtract = function (a, b) {
     var A = new Node(prep(a)), B = new Node(prep(b));
     A.invert();
@@ -379,22 +477,25 @@
       changed = false;
       var nr = mesh.faces.map(function (f) { return mesh.faceNormal(f); });
       var wl = mesh.faces.map(function (f, i) { return G3.dot(nr[i], mesh.verts[f[0]]); });
-      var emap = new Map();
+      /* la clave de arista va empaquetada en un entero: construirla como
+         cadena de texto costaba más que toda la fusión */
+      var emap = new Map(), nv = mesh.verts.length;
       for (var i = 0; i < mesh.faces.length; i++) {
         var f = mesh.faces[i];
         for (var j = 0; j < f.length; j++) {
           var a = f[j], b = f[(j + 1) % f.length];
-          var k = a < b ? a + ',' + b : b + ',' + a;
+          var k = a < b ? a * nv + b : b * nv + a;
           var e = emap.get(k);
-          if (!e) { e = []; emap.set(k, e); }
-          e.push(i);
+          if (e === undefined) emap.set(k, i);
+          else if (typeof e === 'number') emap.set(k, [e, i]);
+          else e.push(i);
         }
       }
       var dead = new Uint8Array(mesh.faces.length);
-      var keys = Array.from(emap.keys());
-      for (var q = 0; q < keys.length; q++) {
-        var fs = emap.get(keys[q]);
-        if (fs.length !== 2) continue;
+      var pares = [];
+      emap.forEach(function (e) { if (typeof e !== 'number' && e.length === 2) pares.push(e); });
+      for (var q = 0; q < pares.length; q++) {
+        var fs = pares[q];
         var f0 = fs[0], f1 = fs[1];
         if (f0 === f1 || dead[f0] || dead[f1]) continue;
         if (G3.dot(nr[f0], nr[f1]) < cosLim) continue;
