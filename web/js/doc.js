@@ -581,6 +581,70 @@
   };
 
   /* Puntos de una polilínea desarrollando los bulges */
+  /* Área y perímetro exactos cuando la forma los tiene.
+     Midiendo sobre la polilínea de visualización, el área de un círculo
+     de radio 10 salía 314,10 en vez de 314,16: la teselación se queda
+     por dentro.  En un plano acotado eso no vale. */
+  E.areaOf = function (ent, doc) {
+    if (!ent) return null;
+    if (ent.type === 'CIRCLE') return Math.PI * ent.r * ent.r;
+    if (ent.type === 'ELLIPSE') {
+      var aE = G.len(ent.maj), bE = aE * ent.ratio;
+      var barrido = G.sweep(ent.t0 === undefined ? 0 : ent.t0, ent.t1 === undefined ? G.TAU : ent.t1);
+      if (barrido < 1e-9 || Math.abs(barrido - G.TAU) < 1e-9) return Math.PI * aE * bE;
+      return null;
+    }
+    if (ent.type === 'LWPOLYLINE' && ent.closed) {
+      var v = ent.verts, n = v.length;
+      if (n < 3) return null;
+      /* área con signo de los vértices, más los casquetes de los tramos
+         curvos: el que se va hacia fuera suma y el que se mete, resta */
+      var total = G.polyArea(v);
+      for (var i = 0; i < n; i++) {
+        var p1 = v[i], p2 = v[(i + 1) % n];
+        if (!p1.b) continue;
+        var arc = G.bulgeArc(p1, p2, p1.b);
+        if (!arc) continue;
+        var inc = Math.abs(arc.inc);
+        var casquete = arc.r * arc.r / 2 * (inc - Math.sin(inc));
+        total += (p1.b > 0 ? casquete : -casquete);
+      }
+      return Math.abs(total);
+    }
+    var ss = E.segs(ent, doc, 3)[0];
+    return ss ? Math.abs(G.polyArea(ss.pts)) : null;
+  };
+
+  E.perimOf = function (ent, doc) {
+    if (!ent) return null;
+    if (ent.type === 'CIRCLE') return G.TAU * ent.r;
+    if (ent.type === 'ARC') return Math.abs(G.sweep(ent.a0, ent.a1)) * ent.r;
+    if (ent.type === 'LINE') return G.dist(ent.p1, ent.p2);
+    if (ent.type === 'ELLIPSE') {
+      var aE = G.len(ent.maj), bE = aE * ent.ratio;
+      var barrido = G.sweep(ent.t0 === undefined ? 0 : ent.t0, ent.t1 === undefined ? G.TAU : ent.t1);
+      if (barrido < 1e-9 || Math.abs(barrido - G.TAU) < 1e-9) {
+        /* Ramanujan: error por debajo de una millonésima */
+        var h = Math.pow(aE - bE, 2) / Math.pow(aE + bE, 2);
+        return Math.PI * (aE + bE) * (1 + 3 * h / (10 + Math.sqrt(4 - 3 * h)));
+      }
+    }
+    if (ent.type === 'LWPOLYLINE') {
+      var v = ent.verts, n = v.length, total = 0;
+      var hasta = ent.closed ? n : n - 1;
+      for (var i = 0; i < hasta; i++) {
+        var p1 = v[i], p2 = v[(i + 1) % n];
+        if (p1.b) {
+          var arc = G.bulgeArc(p1, p2, p1.b);
+          total += arc ? Math.abs(arc.inc) * arc.r : G.dist(p1, p2);
+        } else total += G.dist(p1, p2);
+      }
+      return total;
+    }
+    var ss = E.segs(ent, doc, 3)[0];
+    return ss ? G.polyLen(ss.pts, ss.closed) : null;
+  };
+
   E.plinePts = function (ent, q) {
     var out = [], v = ent.verts, n = v.length;
     if (!n) return out;

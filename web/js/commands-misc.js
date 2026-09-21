@@ -286,9 +286,8 @@
     if (isKw(opt) && opt.kw === 'O') {
       var e = await ctx.getEntity('Designe objetos');
       if (!e) return;
-      var ss = E.segs(e.ent, ctx.doc, 3)[0];
-      if (!ss) return;
-      var ar = Math.abs(G.polyArea(ss.pts)), per = G.polyLen(ss.pts, ss.closed);
+      var ar = E.areaOf(e.ent, ctx.doc), per = E.perimOf(e.ent, ctx.doc);
+      if (ar === null && per === null) return;
       ctx.out('Área = ' + G.fmt(ar, pr) + ', Perímetro = ' + G.fmt(per, pr));
       ctx.app.ui.flashResult('Área = ' + G.fmt(ar, pr));
       return;
