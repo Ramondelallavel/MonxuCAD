@@ -180,38 +180,26 @@
     if (!sel || !sel.length) return;
     var path = await ctx.getEntity('Designe la curva de camino');
     if (!path) return;
-    var pts = CAD.polyOf(ctx, path.ent);
-    if (!pts || pts.length < 2) { ctx.err('El objeto designado no sirve como camino.'); return; }
-    var total = G.polyLen(pts, false);
-    var mode = await ctx.getKeyword('Indique el método de distribución', ['Dividir uniformemente', 'Medir a intervalos'], { def: 'Dividir uniformemente' });
+    var cam = CAD.caminoDe(path.ent, ctx.doc);
+    if (!cam) { ctx.err('El objeto designado no sirve como camino.'); return; }
+    var mode = await ctx.getKeyword('Indique el método de distribución',
+      ['Dividir uniformemente', 'Medir a intervalos'], { def: 'Dividir uniformemente' });
     if (!mode) return;
-    var count, step;
+    var count, step = 0;
     if (mode.kw === 'DU' || mode.kw === 'D') {
       count = await ctx.getInt('Indique número de elementos', { def: 6 });
       if (!count || count < 2) return;
-      step = total / (count - 1);
     } else {
-      step = await ctx.getReal('Precise distancia entre elementos', { def: G.fmt(total / 6, 2) });
+      step = await ctx.getReal('Precise distancia entre elementos', { def: G.fmt(cam.largo / 6, 2) });
       if (!step || step <= 0) return;
-      count = Math.floor(total / step) + 1;
+      count = Math.floor(cam.largo / step + 1e-9) + 1;
+      if (count < 2) { ctx.err('Con esa distancia no cabe ni un elemento más.'); return; }
     }
     var align = await ctx.getKeyword('¿Alinear elementos con el camino?', ['Sí', 'No'], { def: 'Sí' });
-    var doAlign = !align || align.kw === 'S';
     ctx.doc.mark('MATRIZCAMINO');
-    var b = E.extentsAll(sel, ctx.doc);
-    var src = { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
-    var n = 0;
-    for (var i = 1; i < count; i++) {
-      var L = step * i;
-      if (L > total + 1e-9) break;
-      var p = CAD.atLength(pts, L);
-      var p2 = CAD.atLength(pts, Math.min(total, L + Math.max(1e-6, total / 1000)));
-      var ang = doAlign ? G.ang(p, p2) - (i === 1 ? G.ang(CAD.atLength(pts, 0), CAD.atLength(pts, Math.min(total, total / 1000))) : 0) : 0;
-      var m = G.mTrans(p.x - src.x, p.y - src.y);
-      if (doAlign) m = G.mMul(G.mRot(G.ang(p, p2), src), m);
-      CAD.ghost(ctx, sel, m).forEach(function (e) { ctx.doc.add(e); });
-      n++;
-    }
+    var n = CAD.reparteCamino(ctx, sel, cam, {
+      count: count, spacing: step, align: !align || align.kw === 'S'
+    });
     ctx.out(n + ' elemento(s) distribuido(s) a lo largo del camino.');
     ctx.app.refresh();
   });

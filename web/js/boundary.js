@@ -244,7 +244,43 @@
 
     var loops = [conv(outer)].concat(holes.map(conv)).filter(function (l) { return l.length >= 3; });
     if (!loops.length) return { error: 'No se ha detectado ningún contorno válido.' };
+    if (!opts.sinAnidadas) anidadas(loops);
     return { loops: loops, area: Math.abs(G.polyArea(loops[0])) };
+
+    /* Islas dentro de islas.  El rastreo por píxeles sólo llega al primer
+       nivel: lo que hay dentro de una isla queda al otro lado del trazo y
+       nunca toca la región rellenada.  AutoCAD, con la detección Normal
+       —la de siempre—, va alternando hueco y relleno según se entra, y
+       como el sombreado se rellena por paridad basta con recoger también
+       los contornos cerrados que caen enteros dentro. */
+    function anidadas(lps) {
+      var fuera = lps[0];
+      function yaEsta(pts, lista) {
+        var a = Math.abs(G.polyArea(pts));
+        if (!(a > 1e-9)) return true;
+        for (var k = 0; k < lista.length; k++) {
+          var ak = Math.abs(G.polyArea(lista[k]));
+          if (Math.abs(ak - a) > Math.max(ak, a) * 0.03) continue;
+          var ck = G.polyCentroid(lista[k]), cc = G.polyCentroid(pts);
+          if (ck && cc && G.dist(ck, cc) < Math.sqrt(a) * 0.06) return true;
+        }
+        return false;
+      }
+      var extra = [];
+      candidates.forEach(function (e) {
+        if (lps.length + extra.length > 64) return;
+        E.segs(e, doc, 2).forEach(function (s) {
+          var pts = s.pts;
+          if (!s.closed || !pts || pts.length < 3) return;
+          var paso = Math.max(1, Math.floor(pts.length / 16));
+          for (var i = 0; i < pts.length; i += paso)
+            if (!G.ptInPoly(pts[i], fuera)) return;
+          if (yaEsta(pts, lps) || yaEsta(pts, extra)) return;
+          extra.push(pts.slice());
+        });
+      });
+      for (var i2 = 0; i2 < extra.length; i2++) lps.push(extra[i2]);
+    }
   };
 
   /* Seguimiento de contorno de Moore sobre una máscara binaria */

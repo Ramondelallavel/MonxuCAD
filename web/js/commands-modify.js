@@ -135,9 +135,35 @@
     return clean;
   }
 
+  /* ¿todos los tramos van por el mismo círculo y en el mismo sentido?
+     Entonces es un arco y no una polilínea.  Al recortar un círculo la
+     costura cae en mitad de lo que queda y sin esto salía una polilínea
+     partida en dos, que no es lo que devuelve AutoCAD. */
+  function unSoloArco(verts) {
+    if (verts.length < 3) return null;
+    var c = null, r = 0, ccw = null;
+    for (var i = 0; i + 1 < verts.length; i++) {
+      if (!verts[i].b) return null;
+      var a = G.bulgeArc(verts[i], verts[i + 1], verts[i].b);
+      if (!a) return null;
+      if (c === null) { c = a.c; r = a.r; ccw = a.ccw; }
+      else if (a.ccw !== ccw || Math.abs(a.r - r) > Math.max(r, 1) * 1e-7 ||
+               G.dist(a.c, c) > Math.max(r, 1) * 1e-7) return null;
+    }
+    var a0 = G.ang(c, verts[0]), a1 = G.ang(c, verts[verts.length - 1]);
+    var res = ccw ? { c: c, r: r, a0: a0, a1: a1 } : { c: c, r: r, a0: a1, a1: a0 };
+    var sw = G.sweep(res.a0, res.a1);
+    if (!(sw > 1e-9) || sw > G.TAU - 1e-9) return null;
+    return res;
+  }
+
   function entsFromVerts(verts, src, closed) {
     if (verts.length < 2) return [];
     var base = { layer: src.layer, color: src.color, ltype: src.ltype, lw: src.lw, ltscale: src.ltscale };
+    if (!closed && (src.type === 'CIRCLE' || src.type === 'ARC')) {
+      var ar = unSoloArco(verts);
+      if (ar) return [E.arc(ar.c, ar.r, ar.a0, ar.a1, base)];
+    }
     if (verts.length === 2 && !closed) {
       if (!verts[0].b) return [E.line(verts[0], verts[1], base)];
       var arc = G.bulgeArc(verts[0], verts[1], verts[0].b);
@@ -245,8 +271,10 @@
     ctx.out('ANGDIR=sentido antihorario  ANGBASE=0');
     var base = await ctx.getPoint('Precise punto base');
     if (!pt(base)) return;
+    /* Igual que en ESCALA: un ángulo tecleado es un ángulo, no una
+       distancia.  Antes "90" giraba lo que marcase el cursor. */
     var res = await ctx.getPoint('Precise ángulo de rotación o', {
-      base: base, keywords: ['Copiar', 'Referencia'], rubber: 'line',
+      base: base, keywords: ['Copiar', 'Referencia'], rubber: 'line', allowNumber: true,
       preview: function (c) { return ghost(ctx, sel, G.mRot(G.ang(base, c), base)); }
     });
     if (res === null) return;
@@ -254,14 +282,16 @@
     if (isKw(res) && res.kw === 'C') {
       copy = true;
       res = await ctx.getPoint('Precise ángulo de rotación', {
-        base: base, preview: function (c) { return ghost(ctx, sel, G.mRot(G.ang(base, c), base)); }
+        base: base, allowNumber: true,
+        preview: function (c) { return ghost(ctx, sel, G.mRot(G.ang(base, c), base)); }
       });
     }
     if (isKw(res) && res.kw === 'R') {
       var r1 = await ctx.getAngle('Precise ángulo de referencia', { def: 0, base: base });
       var r2 = await ctx.getAngle('Precise ángulo nuevo', { def: 0, base: base });
       ang = (r2 || 0) - (r1 || 0);
-    } else if (typeof res === 'number') ang = G.rad(res);
+    } else if (res && typeof res.num === 'number') ang = G.rad(res.num);
+    else if (typeof res === 'number') ang = G.rad(res);
     else if (pt(res)) ang = G.ang(base, res);
     else return;
     ctx.doc.mark('GIRA');
@@ -276,10 +306,13 @@
     if (!sel || !sel.length) return;
     var base = await ctx.getPoint('Precise punto base');
     if (!pt(base)) return;
+    /* El factor se teclea como número, que es como se usa esto el 99%
+       de las veces.  Sin allowNumber, un "2" se tomaba por entrada
+       directa de distancia: el objeto acababa escalado por 2/10. */
     var res = await ctx.getPoint('Precise factor de escala o', {
-      base: base, keywords: ['Copiar', 'Referencia'],
+      base: base, keywords: ['Copiar', 'Referencia'], allowNumber: true,
       preview: function (c) {
-        var f = G.dist(base, c) / (ctx.app.scaleRef || 10);
+        var f = G.dist(base, c) / (ctx.app.scaleRef || 1);
         return ghost(ctx, sel, G.mScale(f, f, base));
       }
     });
@@ -293,8 +326,9 @@
       var l1 = await ctx.getDist('Precise longitud de referencia', { def: 1, base: base });
       var l2 = await ctx.getDist('Precise longitud nueva', { def: 1, base: base });
       f = (l2 || 1) / (l1 || 1);
-    } else if (typeof res === 'number') f = res;
-    else if (pt(res)) f = G.dist(base, res) / (ctx.app.scaleRef || 10);
+    } else if (res && typeof res.num === 'number') f = res.num;
+    else if (typeof res === 'number') f = res;
+    else if (pt(res)) f = G.dist(base, res) / (ctx.app.scaleRef || 1);
     else return;
     if (!isFinite(f) || Math.abs(f) < 1e-12) { ctx.err('Valor no válido.'); return; }
     ctx.doc.mark('ESCALA');
@@ -649,7 +683,18 @@
       var f = from, t = to;
       if (t - f > 1e-9) {
         if (t <= n) verts = subPath(path, f, t);
-        else verts = subPath(path, f, n).concat(subPath(path, 0, t - n).slice(1));
+        else {
+          /* El trozo que queda pasa por la costura del contorno.  El
+             vértice de unión es el mismo punto en los dos tramos, pero
+             el del primero lleva pandeo cero —es sólo marca de fin—, así
+             que hay que quedarse con el del segundo: si no, al recortar
+             un círculo salía una recta donde tenía que ir la curva. */
+          var tr1 = subPath(path, f, n), tr2 = subPath(path, 0, t - n);
+          if (tr1.length && tr2.length) {
+            if (tr2[0].b) tr1[tr1.length - 1].b = tr2[0].b;
+            verts = tr1.concat(tr2.slice(1));
+          } else verts = tr1.concat(tr2);
+        }
       }
       if (verts.length >= 2) pieces.push(entsFromVerts(verts, ent, false));
     } else {
@@ -1069,10 +1114,10 @@
       var total = G.rad(cfg2.fill);
       for (var i = 1; i < cfg2.count; i++) {
         var ang = (total * i) / (Math.abs(total - G.TAU) < 1e-6 ? cfg2.count : cfg2.count - 1);
-        var m2 = cfg2.rotate ? G.mRot(ang, center) : G.mTrans(
-          G.polar(center, G.ang(center, center), 0).x, 0);
-        if (!cfg2.rotate) {
-          m2 = G.mIdent();
+        var m2;
+        if (cfg2.rotate) m2 = G.mRot(ang, center);
+        else {
+          /* sin girar: cada copia se lleva a donde caería su centro */
           var b = E.extentsAll(sel, ctx.doc);
           var cc = { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
           var np = G.rotAbout(cc, center, ang);
@@ -1080,11 +1125,100 @@
         }
         ghost(ctx, sel, m2).forEach(function (e) { ctx.doc.add(e); });
       }
+      ctx.out(cfg2.count - 1 + ' copia(s) creada(s).');
       ctx.app.refresh();
       return;
     }
-    ctx.err('La matriz de camino aún no está disponible.');
+    return matrizCamino(ctx, sel);
   });
+
+  /* Camino medido: la curva muestreada más su longitud acumulada, para
+     poder situar un punto a una distancia dada del arranque. */
+  function caminoDe(ent, doc) {
+    var ss = E.segs(ent, doc, 3);
+    var pts = ss && ss[0] && ss[0].pts ? ss[0].pts.slice() : null;
+    if (!pts || pts.length < 2) return null;
+    if (ss[0].closed) pts.push(pts[0]);
+    var acum = [0], largo = 0;
+    for (var i = 1; i < pts.length; i++) { largo += G.dist(pts[i - 1], pts[i]); acum.push(largo); }
+    if (largo < 1e-9) return null;
+    /* Dirección en cada vértice por diferencia centrada: sobre un arco
+       muestreado eso da la tangente exacta, mientras que la cuerda del
+       tramo se desvía medio trozo —dos grados en un arco repartido en
+       48—.  En los extremos de un camino abierto se extrapola. */
+    var cerrado = !!ss[0].closed, np = pts.length;
+    var dirs = new Array(np), k;
+    for (k = 0; k < np; k++) {
+      var ka = k > 0 ? k - 1 : (cerrado ? np - 2 : 0);
+      var kb = k < np - 1 ? k + 1 : (cerrado ? 1 : np - 1);
+      dirs[k] = G.ang(pts[ka], pts[kb]);
+    }
+    function delta(a, b) { var d = a - b; while (d > Math.PI) d -= G.TAU; while (d < -Math.PI) d += G.TAU; return d; }
+    if (!cerrado && np >= 4) {
+      dirs[0] = dirs[1] + delta(dirs[1], dirs[2]);
+      dirs[np - 1] = dirs[np - 2] + delta(dirs[np - 2], dirs[np - 3]);
+    }
+    return {
+      largo: largo, cerrado: cerrado,
+      en: function (s) {
+        s = Math.max(0, Math.min(largo, s));
+        var lo = 0, hi = acum.length - 1;
+        while (lo < hi - 1) { var md = (lo + hi) >> 1; if (acum[md] <= s) lo = md; else hi = md; }
+        var tramo = acum[hi] - acum[lo];
+        var f = tramo > 1e-12 ? (s - acum[lo]) / tramo : 0;
+        return { p: G.lerp(pts[lo], pts[hi], f), ang: dirs[lo] - f * delta(dirs[lo], dirs[hi]) };
+      }
+    };
+  }
+
+  /* Reparto a lo largo de una curva, como ARRAYPATH.  El objeto de
+     origen se convierte en el primer elemento, igual que en AutoCAD, y
+     al orientar se gira lo que gire el camino respecto de su arranque:
+     así una pieza horizontal sobre un camino horizontal no se mueve. */
+  function reparteCamino(ctx, sel, cam, cfg) {
+    var n = Math.max(2, cfg.count | 0);
+    var paso = cfg.spacing > 0 ? cfg.spacing : cam.largo / (cam.cerrado ? n : (n - 1));
+    if (!(paso > 1e-12)) return 0;
+    var caja = E.extentsAll(sel, ctx.doc);
+    var ref = { x: (caja.x1 + caja.x2) / 2, y: (caja.y1 + caja.y2) / 2 };
+    var q0 = cam.en(0), hechos = 0, m0 = null, nuevas = [];
+    /* Las copias se sacan del original sin tocar: si se moviese primero,
+       las siguientes saldrían del objeto ya desplazado y se irían
+       acumulando los traslados. */
+    for (var i = 0; i < n; i++) {
+      var s = i * paso;
+      if (!cam.cerrado && s > cam.largo + 1e-9) break;
+      var q = cam.en(s);
+      /* primero se orienta sobre el propio sitio y después se lleva al
+         camino: G.mMul(m, n) aplica n DESPUÉS de m */
+      var m = G.mTrans(q.p.x - ref.x, q.p.y - ref.y);
+      if (cfg.align) m = G.mMul(G.mRot(q.ang - q0.ang, ref), m);
+      if (i === 0) m0 = m;
+      else { ghost(ctx, sel, m).forEach(function (e) { nuevas.push(e); }); hechos++; }
+    }
+    if (m0) sel.forEach(function (e) { E.transform(e, m0, ctx.doc); });
+    nuevas.forEach(function (e) { ctx.doc.add(e); });
+    return hechos;
+  }
+  CAD.caminoDe = caminoDe;
+  CAD.reparteCamino = reparteCamino;
+
+  async function matrizCamino(ctx, sel) {
+    var pe = await ctx.getEntity('Designe la curva del camino', {
+      filter: function (x) {
+        return ['LINE', 'ARC', 'CIRCLE', 'ELLIPSE', 'LWPOLYLINE', 'SPLINE'].indexOf(x.type) >= 0;
+      }
+    });
+    if (!pe) return;
+    var cam = caminoDe(pe.ent, ctx.doc);
+    if (!cam) { ctx.err('Ese objeto no sirve de camino.'); return; }
+    var cfg = await ctx.app.ui.arrayDialog('path');
+    if (!cfg) return;
+    ctx.doc.mark('MATRIZ');
+    var n = reparteCamino(ctx, sel, cam, cfg);
+    ctx.out(n + ' copia(s) creada(s) a lo largo del camino.');
+    ctx.app.refresh();
+  }
 
   /* ============================================================
      ESTIRAR

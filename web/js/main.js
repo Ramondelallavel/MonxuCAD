@@ -36,7 +36,7 @@
     this.startedAt = Date.now();
     this.cleanScreen = false;
     this.lightTheme = false;
-    this.scaleRef = 10;
+    this.scaleRef = 1;      /* arrastrar en ESCALA: el factor es la distancia al punto base, como en AutoCAD */
     this._raf = 0;
   }
   Object.assign(App.prototype, CAD.Engine);

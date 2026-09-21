@@ -1775,6 +1775,23 @@
      Matriz
      ------------------------------------------------------------ */
   UI.prototype.arrayDialog = function (kind) {
+    if (kind === 'path') {
+      return this.dialog({
+        title: 'Matriz de camino', width: 420, body:
+          '<div class="fields">' +
+          '<label>Número de elementos:</label><input type="number" id="acN" value="6" min="2">' +
+          '<label>Separación (0 = repartir):</label><input type="number" id="acSep" value="0" step="any" min="0">' +
+          '<div class="span2"><label class="check"><input type="checkbox" id="acGir" checked> Orientar los elementos según el camino</label></div>' +
+          '</div>',
+        onOk: function (b) {
+          return {
+            count: Math.max(2, parseInt(b.querySelector('#acN').value, 10) || 2),
+            spacing: Math.max(0, parseFloat(b.querySelector('#acSep').value) || 0),
+            align: b.querySelector('#acGir').checked
+          };
+        }
+      });
+    }
     var body = kind === 'rect'
       ? '<div class="fields">' +
       '<label>Filas:</label><input type="number" id="arRows" value="3" min="1">' +

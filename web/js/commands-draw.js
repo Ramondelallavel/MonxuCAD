@@ -199,7 +199,8 @@
     }
     if (!c) return;
     var res = await ctx.getPoint('Precise radio del círculo o', {
-      base: c, keywords: ['Diámetro'], def: ctx.app.lastRadius ? G.fmt(ctx.app.lastRadius, 4) : undefined,
+      base: c, keywords: ['Diámetro'], allowNumber: true,
+      def: ctx.app.lastRadius ? G.fmt(ctx.app.lastRadius, 4) : undefined,
       preview: function (p) { return [E.circle(c, Math.max(1e-9, G.dist(c, p)))]; }
     });
     var r;
@@ -210,7 +211,8 @@
         if (typeof dia !== 'number') return;
         r = dia / 2;
       }
-    } else if (typeof res === 'number') r = res;
+    } else if (res && typeof res.num === 'number') r = res.num;
+    else if (typeof res === 'number') r = res;
     else r = G.dist(c, res);
     if (!r || r <= 0) return;
     ctx.app.lastRadius = r;
