@@ -353,10 +353,27 @@
     }
     var k = 1 / 60, k2 = 1 / 120;
     var rho = density === undefined ? 1 : density;
+    var m = vol * rho;
+    var IX = Ixx * k * rho, IY = Iyy * k * rho, IZ = Izz * k * rho;
+    var PXY = Ixy * k2 * rho, PYZ = Iyz * k2 * rho, PXZ = Ixz * k2 * rho;
+    /* Traslado al centro de gravedad (Steiner).  Los momentos de arriba
+       van referidos al origen, que es lo que imprime AutoCAD, pero para
+       comparar piezas o calcular hace falta el del centro de masas. */
+    var cg = {
+      Ixx: IX - m * (c.y * c.y + c.z * c.z),
+      Iyy: IY - m * (c.x * c.x + c.z * c.z),
+      Izz: IZ - m * (c.x * c.x + c.y * c.y),
+      Ixy: PXY - m * c.x * c.y,
+      Iyz: PYZ - m * c.y * c.z,
+      Ixz: PXZ - m * c.x * c.z
+    };
+    var pr = principales(cg);
     return {
-      volumen: vol, area: area, centroide: c, bbox: b, masa: vol * rho,
-      Ixx: Ixx * k * rho, Iyy: Iyy * k * rho, Izz: Izz * k * rho,
-      Ixy: Ixy * k2 * rho, Iyz: Iyz * k2 * rho, Ixz: Ixz * k2 * rho,
+      volumen: vol, area: area, centroide: c, bbox: b, masa: m,
+      Ixx: IX, Iyy: IY, Izz: IZ,
+      Ixy: PXY, Iyz: PYZ, Ixz: PXZ,
+      centro: cg,
+      principales: pr,
       radioGiro: {
         x: Math.sqrt(Math.abs(Ixx * k) / Math.max(vol, 1e-12)),
         y: Math.sqrt(Math.abs(Iyy * k) / Math.max(vol, 1e-12)),
@@ -364,6 +381,47 @@
       }
     };
   };
+
+  /* Momentos principales y sus direcciones: valores y vectores propios
+     del tensor de inercia en el centro de gravedad, por rotaciones de
+     Jacobi.  El tensor es simétrico, así que el método converge siempre
+     y en pocas vueltas. */
+  function principales(q) {
+    var A = [[q.Ixx, -q.Ixy, -q.Ixz], [-q.Ixy, q.Iyy, -q.Iyz], [-q.Ixz, -q.Iyz, q.Izz]];
+    var V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    var escala = Math.max(Math.abs(A[0][0]), Math.abs(A[1][1]), Math.abs(A[2][2]), 1e-300);
+    for (var vuelta = 0; vuelta < 60; vuelta++) {
+      var p = 0, q2 = 1, may = Math.abs(A[0][1]);
+      if (Math.abs(A[0][2]) > may) { may = Math.abs(A[0][2]); p = 0; q2 = 2; }
+      if (Math.abs(A[1][2]) > may) { may = Math.abs(A[1][2]); p = 1; q2 = 2; }
+      if (may <= escala * 1e-14) break;
+      var theta = (A[q2][q2] - A[p][p]) / (2 * A[p][q2]);
+      var t = Math.sign(theta) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      if (!isFinite(t)) t = 1;
+      var cs = 1 / Math.sqrt(t * t + 1), sn = t * cs;
+      for (var i = 0; i < 3; i++) {
+        var aip = A[i][p], aiq = A[i][q2];
+        A[i][p] = cs * aip - sn * aiq;
+        A[i][q2] = sn * aip + cs * aiq;
+      }
+      for (i = 0; i < 3; i++) {
+        var api = A[p][i], aqi = A[q2][i];
+        A[p][i] = cs * api - sn * aqi;
+        A[q2][i] = sn * api + cs * aqi;
+      }
+      for (i = 0; i < 3; i++) {
+        var vip = V[i][p], viq = V[i][q2];
+        V[i][p] = cs * vip - sn * viq;
+        V[i][q2] = sn * vip + cs * viq;
+      }
+    }
+    var res = [];
+    for (var j = 0; j < 3; j++)
+      res.push({ I: A[j][j], eje: { x: V[0][j], y: V[1][j], z: V[2][j] } });
+    res.sort(function (a2, b2) { return a2.I - b2.I; });
+    return res;
+  }
+  S.principales = principales;
 
   /* ---------- Descripción para la paleta de propiedades ---------- */
   S.describe = function (ent) {

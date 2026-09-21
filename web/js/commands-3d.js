@@ -934,6 +934,20 @@
       ctx.out('  Productos:           Ixy ' + G.fmt(p.Ixy, 2) + '  Iyz ' + G.fmt(p.Iyz, 2) + '  Ixz ' + G.fmt(p.Ixz, 2));
       ctx.out('  Radios de giro:      X ' + G.fmt(p.radioGiro.x, 4) +
               '  Y ' + G.fmt(p.radioGiro.y, 4) + '  Z ' + G.fmt(p.radioGiro.z, 4));
+      if (p.centro) {
+        ctx.out('  Respecto del centro de gravedad:');
+        ctx.out('      Ixx ' + G.fmt(p.centro.Ixx, 2) + '  Iyy ' + G.fmt(p.centro.Iyy, 2) +
+                '  Izz ' + G.fmt(p.centro.Izz, 2));
+        ctx.out('      Ixy ' + G.fmt(p.centro.Ixy, 2) + '  Iyz ' + G.fmt(p.centro.Iyz, 2) +
+                '  Ixz ' + G.fmt(p.centro.Ixz, 2));
+      }
+      if (p.principales) {
+        ctx.out('  Momentos principales y direcciones respecto del centro de gravedad:');
+        p.principales.forEach(function (pp, k) {
+          ctx.out('      I' + (k + 1) + ' = ' + G.fmt(pp.I, 2) +
+                  '   según [' + G.fmt(pp.eje.x, 4) + ', ' + G.fmt(pp.eje.y, 4) + ', ' + G.fmt(pp.eje.z, 4) + ']');
+        });
+      }
     }
   });
 
