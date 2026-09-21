@@ -740,11 +740,29 @@
       W.p(0, 'DIMSTYLE');
       if (r2000) { W.p(105, W.h()); W.p(330, handles.dimstyleTable); W.p(100, 'AcDbSymbolTableRecord'); W.p(100, 'AcDbDimStyleTableRecord'); }
       W.p(2, r2000 ? n : n.toUpperCase()); W.p(70, 0);
-      W.p(41, d.DIMASZ); W.p(42, d.DIMEXO); W.p(44, d.DIMEXE); W.p(140, d.DIMTXT);
-      W.p(147, d.DIMGAP); W.p(40, d.DIMSCALE || 1); W.p(73, 0); W.p(74, 0); W.p(77, d.DIMTAD || 0);
-      W.p(78, d.DIMZIN || 0); W.p(271, d.DIMDEC === undefined ? 2 : d.DIMDEC);
-      W.p(179, d.DIMADEC || 0); W.p(144, d.DIMLFAC || 1);
+      if (d.DIMPOST) W.p(3, d.DIMPOST);
+      if (d.DIMAPOST) W.p(4, d.DIMAPOST);
+      /* se escribe la tabla entera, no media: lo que no se escribe se
+         pierde al volver a abrir y las cotas cambian de aspecto */
+      W.p(40, d.DIMSCALE || 1);
+      W.p(41, d.DIMASZ); W.p(42, d.DIMEXO); W.p(43, d.DIMDLI); W.p(44, d.DIMEXE);
+      W.p(45, d.DIMRND || 0);
+      W.p(47, d.DIMTP || 0); W.p(48, d.DIMTM || 0);
+      W.p(140, d.DIMTXT); W.p(143, d.DIMALTF || 0.0393701); W.p(144, d.DIMLFAC || 1);
+      W.p(146, d.DIMTFAC || 0.7); W.p(147, d.DIMGAP);
+      W.p(71, d.DIMTOL || 0); W.p(72, d.DIMLIM || 0);
+      W.p(73, d.DIMTIH || 0); W.p(74, d.DIMTOH || 0);
+      W.p(75, d.DIMSE1 || 0); W.p(76, d.DIMSE2 || 0);
+      W.p(77, d.DIMTAD || 0); W.p(78, d.DIMZIN || 0);
+      W.p(170, d.DIMALT || 0); W.p(171, d.DIMALTD === undefined ? 3 : d.DIMALTD);
+      W.p(172, d.DIMTOFL === undefined ? 1 : d.DIMTOFL);
       W.p(176, d.DIMCLRD || 0); W.p(177, d.DIMCLRE || 0); W.p(178, d.DIMCLRT || 0);
+      W.p(179, d.DIMADEC || 0);
+      W.p(271, d.DIMDEC === undefined ? 2 : d.DIMDEC);
+      W.p(272, d.DIMTDEC === undefined ? 2 : d.DIMTDEC);
+      W.p(279, d.DIMTMOVE || 0); W.p(280, d.DIMJUST || 0);
+      W.p(281, d.DIMSD1 || 0); W.p(282, d.DIMSD2 || 0);
+      W.p(289, d.DIMATFIT === undefined ? 3 : d.DIMATFIT);
       if (r2000) { W.p(340, W.fixed.placeholder); }
     });
     W.p(0, 'ENDTAB');
@@ -939,7 +957,7 @@
           if (v === 'ENDSEC') break;
           if (v === 'TABLE') { curTable = null; continue; }
           if (v === 'ENDTAB') { curTable = null; continue; }
-          if (v === 'LAYER' || v === 'LTYPE' || v === 'STYLE' || v === 'DIMSTYLE') { rec = { t: v }; }
+          if (v === 'LAYER' || v === 'LTYPE' || v === 'STYLE' || v === 'DIMSTYLE') { rec = { t: v, codes: [] }; }
           else rec = null;
           continue;
         }
@@ -947,6 +965,7 @@
           if (c === 2 && !curTable) curTable = v;
           continue;
         }
+        rec.codes.push([c, v]);
         if (c === 2) rec.name = String(v);
         else if (c === 70) rec.flags = v;
         else if (c === 62) rec.color = v;
@@ -989,9 +1008,7 @@
             css: fuenteCss(rec.font)
           };
         } else if (rec.t === 'DIMSTYLE') {
-          var ds = E.defaultDimStyle(rec.name);
-          if (rec.DIMTXT) ds.DIMTXT = rec.DIMTXT;
-          doc.dimStyles[rec.name] = ds;
+          doc.dimStyles[rec.name] = leeDimStyle(rec);
         }
         rec = null;
       }
@@ -1198,6 +1215,44 @@
     for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) o.push(codes[i][1]);
     return o;
   }
+  /* ------------------------------------------------------------
+     Estilo de acotación
+
+     De toda la tabla sólo se leía la altura de texto: el resto —tamaño
+     de flecha, salientes de las líneas de extensión, hueco del texto,
+     escala general, decimales, tolerancias, colores— se tiraba y cada
+     cota importada se dibujaba con el estilo de fábrica.  Un plano
+     ajeno llegaba con todas las cotas cambiadas de aspecto.
+     ------------------------------------------------------------ */
+  var DIMMAP = {
+    40: 'DIMSCALE', 41: 'DIMASZ', 42: 'DIMEXO', 43: 'DIMDLI', 44: 'DIMEXE',
+    45: 'DIMRND', 46: 'DIMDLE', 47: 'DIMTP', 48: 'DIMTM',
+    140: 'DIMTXT', 141: 'DIMCEN', 142: 'DIMTSZ', 143: 'DIMALTF', 144: 'DIMLFAC',
+    145: 'DIMTVP', 146: 'DIMTFAC', 147: 'DIMGAP',
+    71: 'DIMTOL', 72: 'DIMLIM', 73: 'DIMTIH', 74: 'DIMTOH', 75: 'DIMSE1', 76: 'DIMSE2',
+    77: 'DIMTAD', 78: 'DIMZIN',
+    170: 'DIMALT', 171: 'DIMALTD', 172: 'DIMTOFL', 174: 'DIMTIX', 175: 'DIMSOXD',
+    176: 'DIMCLRD', 177: 'DIMCLRE', 178: 'DIMCLRT', 179: 'DIMADEC',
+    271: 'DIMDEC', 272: 'DIMTDEC', 275: 'DIMAUNIT', 277: 'DIMLUNIT',
+    279: 'DIMTMOVE', 280: 'DIMJUST', 281: 'DIMSD1', 282: 'DIMSD2',
+    289: 'DIMATFIT'
+  };
+
+  function leeDimStyle(rec) {
+    var ds = E.defaultDimStyle(rec.name);
+    var cs = rec.codes || [];
+    for (var i = 0; i < cs.length; i++) {
+      var c = cs[i][0], v = cs[i][1];
+      var k = DIMMAP[c];
+      if (k !== undefined && typeof v === 'number') { ds[k] = v; continue; }
+      if (c === 3) ds.DIMPOST = String(v || '');
+      else if (c === 4) ds.DIMAPOST = String(v || '');
+    }
+    /* el grupo 2 de un DIMSTYLE es su nombre, no un sufijo */
+    ds.name = rec.name;
+    return ds;
+  }
+
   /* A qué familia del navegador se parece cada fuente de AutoCAD.  Las
      .shx de trazos van con la de palotes; las de verdad, con la suya. */
   function fuenteCss(f) {
