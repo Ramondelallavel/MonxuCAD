@@ -550,11 +550,24 @@
      a fabricar.  La tolerancia se saca ahora del tamaño de la propia
      pieza, muy por debajo de cualquier detalle real.
      ------------------------------------------------------------ */
+  /* Tolerancia con la que se sueldan los vértices de un STL recién
+     leído.
+
+     Lo que limita no es el tamaño de la pieza sino la coma flotante de
+     32 bits con la que se guarda el formato: su paso lo marca la
+     coordenada más grande, no la diagonal.  Con un par de pasos basta
+     para cerrar las grietas que deja el redondeo del fichero.  Antes se
+     usaba media millonésima de la diagonal, que en una placa de ciento
+     veinte milímetros son setenta y dos micras: eso se llevaba por
+     delante los detalles de una pieza mecánica de verdad y dejaba la
+     malla no-manifold justo al importarla. */
   function soldaduraPara(mesh) {
     if (!mesh || !mesh.verts.length) return 1e-7;
     var b = mesh.bbox();
-    var diag = Math.hypot(b.x2 - b.x1, b.y2 - b.y1, b.z2 - b.z1);
-    return Math.max(1e-7, diag * 5e-7);
+    var may = Math.max(Math.abs(b.x1), Math.abs(b.x2), Math.abs(b.y1),
+                       Math.abs(b.y2), Math.abs(b.z1), Math.abs(b.z2));
+    if (!isFinite(may) || may <= 0) may = 1;
+    return Math.max(1e-7, may * 2.4e-7);
   }
   X.soldaduraPara = soldaduraPara;
 

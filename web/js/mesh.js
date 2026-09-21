@@ -273,8 +273,95 @@
       m.weld(tol * 0.1);
       dropDegenerate(m);
     }
+    giraDiagonalesRepetidas(m);
     return m;
   };
+
+  /* ------------------------------------------------------------
+     Diagonales repetidas
+
+     Dos caras que comparten dos vértices que NO forman arista entre
+     ellas —pasa a menudo alrededor de un empalme— se triangulan cada una
+     por su cuenta y pueden elegir las dos la misma diagonal.  Esa
+     diagonal acaba usada por cuatro triángulos: la malla poligonal era
+     manifold y la triangulada ya no, y eso sale a relucir justo al
+     exportar a STL, que es donde más duele, porque cualquier laminador
+     o programa de fabricación lo rechaza.
+
+     Se arregla girando la diagonal de uno de los dos pares: la
+     operación de toda la vida, que no mueve un solo vértice ni cambia
+     la superficie.
+     ------------------------------------------------------------ */
+  function apice(f, a, b) {
+    for (var i = 0; i < 3; i++) if (f[i] !== a && f[i] !== b) return f[i];
+    return -1;
+  }
+  function vaDeAaB(f, a, b) {
+    for (var i = 0; i < 3; i++) if (f[i] === a && f[(i + 1) % 3] === b) return true;
+    return false;
+  }
+  function normalTri(V, f) {
+    return G3.polyNormal([V[f[0]], V[f[1]], V[f[2]]]);
+  }
+
+  function giraDiagonalesRepetidas(m) {
+    var vueltas = 0;
+    while (vueltas++ < 12) {
+      var n = m.verts.length, F = m.faces, uso = new Map(), i, j;
+      for (i = 0; i < F.length; i++) {
+        var f = F[i];
+        if (f.length !== 3) continue;
+        for (j = 0; j < 3; j++) {
+          var a = f[j], b = f[(j + 1) % 3];
+          if (a === b) continue;
+          var k = a < b ? a * n + b : b * n + a;
+          var e = uso.get(k);
+          if (e === undefined) uso.set(k, [i]); else e.push(i);
+        }
+      }
+      var tocados = {}, hechos = 0;
+      uso.forEach(function (lista, k) {
+        if (lista.length !== 4) return;
+        var a = Math.floor(k / n), b = k - a * n;
+        for (var x = 0; x < 4; x++) {
+          for (var y = x + 1; y < 4; y++) {
+            if (tocados[lista[x]] || tocados[lista[y]]) continue;
+            if (!giraPar(m, lista[x], lista[y], a, b, uso, n)) continue;
+            tocados[lista[x]] = 1; tocados[lista[y]] = 1;
+            hechos++;
+            return;
+          }
+        }
+      });
+      if (!hechos) break;
+    }
+  }
+
+  function giraPar(m, i1, i2, a, b, uso, n) {
+    var V = m.verts, f1 = m.faces[i1], f2 = m.faces[i2];
+    if (!f1 || !f2 || f1.length !== 3 || f2.length !== 3) return false;
+    /* el que recorre a→b y el que recorre b→a */
+    if (!vaDeAaB(f1, a, b)) { var t = f1; f1 = f2; f2 = t; var ti = i1; i1 = i2; i2 = ti; }
+    if (!vaDeAaB(f1, a, b) || !vaDeAaB(f2, b, a)) return false;
+    var c = apice(f1, a, b), d = apice(f2, a, b);
+    if (c < 0 || d < 0 || c === d) return false;
+    /* sólo entre triángulos de la misma cara: si no, se estaría girando
+       una arista de verdad de la superficie */
+    var n1 = normalTri(V, f1), n2 = normalTri(V, f2);
+    if (G3.dot(n1, n2) < 0.999999) return false;
+    /* la diagonal nueva no puede existir ya */
+    var kn = c < d ? c * n + d : d * n + c;
+    if (uso.has(kn)) return false;
+    var t1 = [a, d, c], t2 = [d, b, c];
+    var m1 = normalTri(V, t1), m2 = normalTri(V, t2);
+    if (G3.len2(m1) < 1e-20 || G3.len2(m2) < 1e-20) return false;
+    /* el cuadrilátero tiene que ser convexo: si no, la diagonal nueva se
+       sale y los triángulos se doblan */
+    if (G3.dot(m1, n1) <= 0 || G3.dot(m2, n1) <= 0) return false;
+    m.faces[i1] = t1;
+    m.faces[i2] = t2;
+    return true;
+  }
 
   /* Sólo caras con índices repetidos: esas sí son basura */
   function dropDegenerate(m) {
@@ -325,11 +412,30 @@
   };
 
   /* Volumen con signo (teorema de la divergencia) y área total */
+  /* El volumen se mide respecto a un punto de la propia malla.
+
+     Con el origen del dibujo, una pieza colocada en coordenadas de
+     verdad —una parcela en UTM anda por los 4.500.000— pierde toda la
+     precisión: cada sumando vale del orden de 10^19 y el resultado
+     10^4, así que la resta se come las cifras significativas y el
+     volumen sale con un error mayor que él mismo.  Eso hacía fracasar
+     cualquier comprobación de volumen: el empalme de aristas de una
+     caja colocada allí no salía.
+
+     El resultado no depende del punto que se tome —la integral es
+     invariante a la traslación en una malla cerrada—, así que se toma
+     uno de la pieza y todo queda en números pequeños. */
   Mesh.prototype.volume = function () {
-    var t = this.triangles(), v = 0;
+    var t = this.triangles(), V = this.verts, v = 0;
+    if (!t.length) return 0;
+    var o = V[t[0][0]];
+    if (!o) return 0;
     for (var i = 0; i < t.length; i++) {
-      var a = this.verts[t[i][0]], b = this.verts[t[i][1]], c = this.verts[t[i][2]];
-      v += G3.dot(a, G3.cross(b, c));
+      var a = V[t[i][0]], b = V[t[i][1]], c = V[t[i][2]];
+      var ax = a.x - o.x, ay = a.y - o.y, az = a.z - o.z;
+      var bx = b.x - o.x, by = b.y - o.y, bz = b.z - o.z;
+      var cx = c.x - o.x, cy = c.y - o.y, cz = c.z - o.z;
+      v += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
     }
     return v / 6;
   };
@@ -342,18 +448,27 @@
     return s / 1;
   };
   /* Centro de masas del sólido */
+  /* Lo mismo con el centro de masas: se calcula en local y se devuelve
+     al sitio, que si no una pieza lejos del origen da un centro que
+     puede caer a kilómetros de ella. */
   Mesh.prototype.centroid = function () {
-    var t = this.triangles(), vol = 0, c = v3(0, 0, 0);
+    var t = this.triangles(), V = this.verts, vol = 0, c = v3(0, 0, 0);
+    if (!t.length) return G3.boxCenter(this.bbox());
+    var o = V[t[0][0]];
+    if (!o) return G3.boxCenter(this.bbox());
     for (var i = 0; i < t.length; i++) {
-      var a = this.verts[t[i][0]], b = this.verts[t[i][1]], d = this.verts[t[i][2]];
-      var vv = G3.dot(a, G3.cross(b, d)) / 6;
+      var a = V[t[i][0]], b = V[t[i][1]], d = V[t[i][2]];
+      var ax = a.x - o.x, ay = a.y - o.y, az = a.z - o.z;
+      var bx = b.x - o.x, by = b.y - o.y, bz = b.z - o.z;
+      var dx = d.x - o.x, dy = d.y - o.y, dz = d.z - o.z;
+      var vv = (ax * (by * dz - bz * dy) + ay * (bz * dx - bx * dz) + az * (bx * dy - by * dx)) / 6;
       vol += vv;
-      c.x += (a.x + b.x + d.x) * vv / 4;
-      c.y += (a.y + b.y + d.y) * vv / 4;
-      c.z += (a.z + b.z + d.z) * vv / 4;
+      c.x += (ax + bx + dx) * vv / 4;
+      c.y += (ay + by + dy) * vv / 4;
+      c.z += (az + bz + dz) * vv / 4;
     }
     if (Math.abs(vol) < 1e-12) return G3.boxCenter(this.bbox());
-    return v3(c.x / vol, c.y / vol, c.z / vol);
+    return v3(o.x + c.x / vol, o.y + c.y / vol, o.z + c.z / vol);
   };
 
   /* Soldado de vértices coincidentes */

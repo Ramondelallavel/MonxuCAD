@@ -346,10 +346,22 @@
     var c = mesh.centroid();
     var b = mesh.bbox();
     var tris = mesh.triangles();
-    /* tensor de inercia por el método de Tonon sobre tetraedros al origen */
+    /* Tensor de inercia por el método de Tonon sobre tetraedros, pero
+       referido al CENTRO DE GRAVEDAD, no al origen del dibujo.
+
+       Con el origen, una pieza colocada en coordenadas de verdad —una
+       parcela en UTM anda por los 4.500.000— da sumandos del orden de
+       10^34 de los que hay que restar otro tanto para llegar al momento
+       central, que vale 10^6: no queda ni una cifra buena.  Calculando
+       en local sale exacto, y los momentos al origen —que son los que
+       imprime AutoCAD— se obtienen después sumando Steiner, que es la
+       dirección en la que la resta no hace daño. */
     var Ixx = 0, Iyy = 0, Izz = 0, Ixy = 0, Iyz = 0, Ixz = 0;
     for (var i = 0; i < tris.length; i++) {
-      var p1 = mesh.verts[tris[i][0]], p2 = mesh.verts[tris[i][1]], p3 = mesh.verts[tris[i][2]];
+      var q1 = mesh.verts[tris[i][0]], q2 = mesh.verts[tris[i][1]], q3 = mesh.verts[tris[i][2]];
+      var p1 = { x: q1.x - c.x, y: q1.y - c.y, z: q1.z - c.z };
+      var p2 = { x: q2.x - c.x, y: q2.y - c.y, z: q2.z - c.z };
+      var p3 = { x: q3.x - c.x, y: q3.y - c.y, z: q3.z - c.z };
       var det = G3.dot(p1, G3.cross(p2, p3));
       var vx = [p1.x, p2.x, p3.x], vy = [p1.y, p2.y, p3.y], vz = [p1.z, p2.z, p3.z];
       function f2(a) { return a[0] * a[0] + a[1] * a[1] + a[2] * a[2] + a[0] * a[1] + a[1] * a[2] + a[2] * a[0]; }
@@ -367,19 +379,17 @@
     var k = 1 / 60, k2 = 1 / 120;
     var rho = density === undefined ? 1 : density;
     var m = vol * rho;
-    var IX = Ixx * k * rho, IY = Iyy * k * rho, IZ = Izz * k * rho;
-    var PXY = Ixy * k2 * rho, PYZ = Iyz * k2 * rho, PXZ = Ixz * k2 * rho;
-    /* Traslado al centro de gravedad (Steiner).  Los momentos de arriba
-       van referidos al origen, que es lo que imprime AutoCAD, pero para
-       comparar piezas o calcular hace falta el del centro de masas. */
     var cg = {
-      Ixx: IX - m * (c.y * c.y + c.z * c.z),
-      Iyy: IY - m * (c.x * c.x + c.z * c.z),
-      Izz: IZ - m * (c.x * c.x + c.y * c.y),
-      Ixy: PXY - m * c.x * c.y,
-      Iyz: PYZ - m * c.y * c.z,
-      Ixz: PXZ - m * c.x * c.z
+      Ixx: Ixx * k * rho, Iyy: Iyy * k * rho, Izz: Izz * k * rho,
+      Ixy: Ixy * k2 * rho, Iyz: Iyz * k2 * rho, Ixz: Ixz * k2 * rho
     };
+    /* y de ahí al origen, que es lo que imprime AutoCAD */
+    var IX = cg.Ixx + m * (c.y * c.y + c.z * c.z);
+    var IY = cg.Iyy + m * (c.x * c.x + c.z * c.z);
+    var IZ = cg.Izz + m * (c.x * c.x + c.y * c.y);
+    var PXY = cg.Ixy + m * c.x * c.y;
+    var PYZ = cg.Iyz + m * c.y * c.z;
+    var PXZ = cg.Ixz + m * c.x * c.z;
     var pr = principales(cg);
     return {
       volumen: vol, area: area, centroide: c, bbox: b, masa: m,
@@ -388,9 +398,9 @@
       centro: cg,
       principales: pr,
       radioGiro: {
-        x: Math.sqrt(Math.abs(Ixx * k) / Math.max(vol, 1e-12)),
-        y: Math.sqrt(Math.abs(Iyy * k) / Math.max(vol, 1e-12)),
-        z: Math.sqrt(Math.abs(Izz * k) / Math.max(vol, 1e-12))
+        x: Math.sqrt(Math.abs(IX / rho) / Math.max(vol, 1e-12)),
+        y: Math.sqrt(Math.abs(IY / rho) / Math.max(vol, 1e-12)),
+        z: Math.sqrt(Math.abs(IZ / rho) / Math.max(vol, 1e-12))
       }
     };
   };
