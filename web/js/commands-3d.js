@@ -755,6 +755,14 @@
   /* ============================================================
      EDICIÓN DE SÓLIDOS
      ============================================================ */
+  function mismoLado(m2, lado, pl) {
+    if (!m2 || !m2.faces.length || !Math.abs(lado)) return false;
+    var c;
+    try { c = m2.centroid(); } catch (e) { c = null; }
+    if (!c || !isFinite(c.x)) c = G3.boxCenter(m2.bbox());
+    return (G3.dot(pl.n, c) - pl.w) * lado > 0;
+  }
+
   Cmd.add(['CORTE', 'SLICE', 'SECCIONAR'], { group: '3d', icon: 'slice', title: 'Cortar sólido' },
   async function (ctx) {
     var sel = await get3D(ctx, 'Designe objetos a cortar');
@@ -778,7 +786,14 @@
       plane = G3.planeFrom3(A, B, C);
       if (G3.len2(plane.n) < 1e-12) { ctx.err('Los tres puntos son colineales.'); return; }
     }
-    var side = await ctx.getKeyword('Precise un punto del lado deseado o', ['ambos Lados'], { def: 'ambos Lados' });
+    /* Como en AutoCAD: o se señala un punto del lado que se conserva, o
+       se pide quedarse con los dos.  Antes sólo admitía la palabra, así
+       que señalar un lado no servía de nada y siempre se guardaba el de
+       delante del plano. */
+    var side = await ctx.getPoint('Precise un punto del lado deseado o',
+      { keywords: ['ambos Lados'], def: 'ambos Lados' });
+    var ambos = !side || side.kw === 'L' || !pt(side);
+    var ladoP = ambos ? null : v3(side.x, side.y, side.z || 0);
     ctx.doc.mark('CORTE');
     var made = 0;
     for (var i = 0; i < sel.length; i++) {
@@ -798,8 +813,18 @@
       var above = CSG.intersect(mesh, halfBox(false));
       var below = CSG.intersect(mesh, halfBox(true));
       var keep = [];
-      if (side && side.kw === 'L') { if (above.faces.length) keep.push(above); if (below.faces.length) keep.push(below); }
-      else { if (above.faces.length) keep.push(above); }
+      if (ambos) {
+        if (above.faces.length) keep.push(above);
+        if (below.faces.length) keep.push(below);
+      } else {
+        /* se conserva la mitad que está del mismo lado que el punto
+           señalado; se mira con su centro de masas, que no depende de
+           cómo esté orientada la caja del semiespacio */
+        var lado = G3.dot(plane.n, ladoP) - plane.w;
+        var elegido = mismoLado(above, lado, plane) ? above : (mismoLado(below, lado, plane) ? below : null);
+        if (!elegido) elegido = above.faces.length ? above : below;
+        if (elegido.faces.length) keep.push(elegido);
+      }
       if (!keep.length) continue;
       ctx.doc.remove(sel[i]);
       keep.forEach(function (m2) {

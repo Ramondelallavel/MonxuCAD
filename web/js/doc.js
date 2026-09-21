@@ -592,7 +592,8 @@
       var aE = G.len(ent.maj), bE = aE * ent.ratio;
       var barrido = G.sweep(ent.t0 === undefined ? 0 : ent.t0, ent.t1 === undefined ? G.TAU : ent.t1);
       if (barrido < 1e-9 || Math.abs(barrido - G.TAU) < 1e-9) return Math.PI * aE * bE;
-      return null;
+      /* arco de elipse: el área del recinto que cierra con su cuerda,
+         igual que hace AutoCAD con un arco de círculo */
     }
     if (ent.type === 'LWPOLYLINE' && ent.closed) {
       var v = ent.verts, n = v.length;

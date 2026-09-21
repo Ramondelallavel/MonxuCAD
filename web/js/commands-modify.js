@@ -381,13 +381,7 @@
         if (r2 <= 1e-9) return null;
         return E.arc(ent.c, r2, ent.a0, ent.a1, base);
       }
-      case 'ELLIPSE': {
-        var half = G.len(ent.maj);
-        var f = (half + (G.dist(ent.c, side) > half ? d : -d)) / half;
-        if (f <= 0) return null;
-        var el = E.ellipse(ent.c, G.mul(ent.maj, f), ent.ratio, ent.t0, ent.t1, base);
-        return el;
-      }
+      case 'ELLIPSE': return offsetEllipse(ent, d, side, base, through);
       case 'LWPOLYLINE': return offsetPline(ent, d, side, base, through);
       case 'SPLINE': {
         var pts = E.splinePts(ent);
@@ -399,6 +393,71 @@
     }
   }
   CAD.offsetEntity = offsetEntity;
+
+  /* El desfase de una elipse no es otra elipse: una elipse escalada sólo
+     guarda la distancia pedida en los extremos del eje mayor, y en los
+     del menor se queda corta en proporción al achatamiento.  Como hace
+     AutoCAD, se devuelve una spline que sigue la normal punto a punto.
+     Si la elipse es en realidad un círculo sí se devuelve una elipse,
+     que ahí sí es exacta. */
+  function offsetEllipse(ent, d, side, base, through) {
+    var aE = G.len(ent.maj);
+    if (aE < 1e-12) return null;
+    var bE = aE * ent.ratio;
+    if (bE < 1e-12) return null;
+    var rot = Math.atan2(ent.maj.y, ent.maj.x);
+    var cr = Math.cos(rot), sr = Math.sin(rot);
+    /* el punto designado, en los ejes de la elipse */
+    var dx = side.x - ent.c.x, dy = side.y - ent.c.y;
+    var lx = dx * cr + dy * sr, ly = -dx * sr + dy * cr;
+    var fuera = (lx * lx) / (aE * aE) + (ly * ly) / (bE * bE) >= 1;
+    var sgn = fuera ? 1 : -1;
+    var t0 = ent.t0 === undefined ? 0 : ent.t0;
+    var t1 = ent.t1 === undefined ? G.TAU : ent.t1;
+    var barr = t1 - t0;
+    var entera = Math.abs(barr) < 1e-9 || Math.abs(Math.abs(barr) - G.TAU) < 1e-9;
+    if (entera) barr = G.TAU;
+    var n = Math.max(48, Math.min(720, Math.ceil(Math.abs(barr) / (Math.PI / 96))));
+    var i, t, dd = d;
+    if (through) {
+      /* distancia real al punto designado */
+      var mejor = Infinity;
+      for (i = 0; i <= n; i++) {
+        t = t0 + barr * i / n;
+        var q = G.ellPt(ent.c, ent.maj.x, ent.maj.y, ent.ratio, t);
+        var dq = G.dist(q, side);
+        if (dq < mejor) mejor = dq;
+      }
+      dd = mejor;
+    }
+    if (!(dd > 1e-12)) return null;
+    if (Math.abs(ent.ratio - 1) < 1e-6) {           /* círculo: exacto */
+      var r = aE + sgn * dd;
+      if (r <= 1e-9) return null;
+      return E.ellipse(ent.c, { x: r * cr, y: r * sr }, 1, ent.t0, ent.t1, base);
+    }
+    var pts = [];
+    var hasta = entera ? n - 1 : n;
+    for (i = 0; i <= hasta; i++) {
+      t = t0 + barr * i / n;
+      var ct = Math.cos(t), st = Math.sin(t);
+      var x = aE * ct, y = bE * st;
+      /* normal exterior sin normalizar: la tangente girada un cuarto */
+      var nx = bE * ct, ny = aE * st;
+      var L = Math.hypot(nx, ny);
+      if (L < 1e-12) continue;
+      /* hacia dentro, más allá del radio de curvatura el punto se da la
+         vuelta y sale un rizo; esos puntos se dejan fuera */
+      if (sgn < 0) {
+        var rc = Math.pow(aE * aE * st * st + bE * bE * ct * ct, 1.5) / (aE * bE);
+        if (dd >= rc - 1e-12) continue;
+      }
+      var px = x + sgn * dd * nx / L, py = y + sgn * dd * ny / L;
+      pts.push({ x: ent.c.x + px * cr - py * sr, y: ent.c.y + px * sr + py * cr });
+    }
+    if (pts.length < 4) return null;
+    return E.spline(pts, entera && pts.length === n, base);
+  }
 
   function sideSign(pts, side, closed) {
     var best = Infinity, sgn = 1;
