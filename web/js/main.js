@@ -73,11 +73,12 @@
   };
 
   App.prototype.banner = function () {
-    this.out('MonxuCAD  —  estación de dibujo y diseño 2D', 'ok');
+    this.out('MonxuCAD  —  dibujo 2D, modelado 3D y fabricación', 'ok');
     this.out('Dibujo nuevo. Escriba un comando o púlselo en la cinta.  EJEMPLO carga una planta de muestra.');
     this.out('Dibujo: LINEA POL CIRCULO ARCO RECTANG LINEAM SOMBREA CONTORNO   Modificar: RECORTA EMPALME DESFASE MATRIZ');
     this.out('Acotar: ACOTALINEAL ACOTARAPIDA   Papel: VENTANAS ESPACIOM ESCALAVP CAJETIN   Bloques: PALETABLOQUES');
-    this.out('AYUDA lista los ' + Object.keys(CAD.Cmd.reg).length + ' comandos.  ABRE importa DXF.  EXPORTAR escribe DXF/PDF/SVG.');
+    this.out('3D: escriba 3D o pulse el conmutador de la barra de estado.  PRISMARECT CILINDRO EXTRUSION REVOLUCION TALADRO');
+    this.out('AYUDA lista los ' + Object.keys(CAD.Cmd.reg).length + ' comandos.  ABRE importa DXF.  EXPORTAR escribe DXF/PDF/SVG y EXPORTA3D, STL y demás.');
   };
 
   /* Bloqueo de campo de la entrada dinámica (tecla Tab).

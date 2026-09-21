@@ -17,11 +17,15 @@
     status: null
   });
 
-  /* Si la página se sirve desde el propio puente, se usa su mismo origen */
-  if (!B.url && location.protocol.indexOf('http') === 0) B.url = location.origin;
+  /* Si la página se sirve desde el propio puente, se usa su mismo origen.
+     Queda apuntado que es una suposición, no algo que haya pedido nadie:
+     de eso depende que se avise o no al arrancar. */
+  B.propio = false;
+  if (!B.url && location.protocol.indexOf('http') === 0) { B.url = location.origin; B.propio = true; }
 
   B.setUrl = function (u) {
     B.url = (u || '').replace(/\/+$/, '');
+    B.propio = false;
     try { localStorage.setItem('monxucad.bridge', B.url); } catch (e) { }
     B.status = null;
   };
@@ -151,8 +155,12 @@
       B.check().then(function (st) {
         if (st && (st.canRead || st.canWrite)) {
           app.out('Puente DWG activo: ABRE acepta .dwg y GUARDARDWG lo escribe.', 'ok');
-        } else if (B.url) {
-          app.out('Puente DWG configurado en ' + B.url + ' pero sin motor de conversión. Véase docs/INSTALL.md.', 'warn');
+        } else if (B.url && !B.propio) {
+          /* Sólo se avisa si alguien configuró un puente a mano.  Cuando
+             la dirección se dedujo del propio origen —el caso de un sitio
+             estático corriente— no hay nada que avisar: el aviso salía en
+             cada arranque y hacía pensar que algo iba mal. */
+          app.out('El puente DWG de ' + B.url + ' no responde: ABRE y GUARDAR siguen funcionando con DXF.', 'warn');
         }
       });
     }, 600);

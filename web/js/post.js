@@ -55,7 +55,7 @@
     },
     tool: function (m, ctx) {
       var L = [];
-      L.push(this.comment('T' + m.tool.num + ' ' + m.tool.name + ' D' + f(m.tool.d)));
+      L.push(this.comment('T' + m.tool.num + ' ' + nomHerr(m.tool)));
       L.push('T' + m.tool.num + ' M06');
       L.push('G90 G54');
       L.push('S' + Math.round(m.rpm) + ' M03');
@@ -452,6 +452,16 @@
   /* ============================================================
      Generación del programa
      ============================================================ */
+  /* Nombre de la herramienta para el comentario del programa.  Los
+     nombres de fábrica ya traen el diámetro ("Fresa plana Ø10"), así que
+     añadirlo otra vez dejaba "FRESA PLANA Ø10 D10" en cada cabecera. */
+  function nomHerr(t) {
+    var n = String(t.name || ('T' + t.num));
+    if (!t.d) return n;
+    if (n.indexOf('\u00d8') >= 0 || n.indexOf(String(t.d)) >= 0) return n;
+    return n + ' D' + f(t.d);
+  }
+
   P.generate = function (paths, post, ctx) {
     post = post || P.FANUC;
     ctx = Object.assign({
