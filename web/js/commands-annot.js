@@ -68,21 +68,37 @@
       var r2 = ctx.app.assocRef(b);
       if (r1 || r2) assoc = { p1: r1, p2: r2 };
     }
+    /* Orientación de la cota lineal: como en AutoCAD, manda por dónde se
+       saca la línea de cota.  Se mira cuánto se sale el punto del cuadro
+       que forman los dos orígenes: si se sale por arriba o por abajo, la
+       cota es horizontal; si se sale por los lados, vertical.  Antes se
+       comparaba contra el punto medio, y una cota de (0,0) a (100,0)
+       sacada 20 hacia arriba salía vertical y medía cero. */
+    function giroPara(c) {
+      var y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+      var x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x);
+      var fueraY = c.y < y0 ? y0 - c.y : (c.y > y1 ? c.y - y1 : 0);
+      var fueraX = c.x < x0 ? x0 - c.x : (c.x > x1 ? c.x - x1 : 0);
+      if (fueraY > fueraX + 1e-9) return 0;
+      if (fueraX > fueraY + 1e-9) return Math.PI / 2;
+      /* dentro del cuadro: manda la dirección dominante de los orígenes */
+      return (x1 - x0) >= (y1 - y0) ? 0 : Math.PI / 2;
+    }
     var dim = newDim(ctx, 'linear', { p1: a, p2: b, p3: G.mid(a, b), rot: 0 });
     if (assoc) dim.assoc = assoc;
     var p3 = await ctx.getPoint('Precise ubicación de línea de cota o', {
       keywords: ['textoM', 'Texto', 'ánGulo', 'Horizontal', 'Vertical', 'Rotado'],
       preview: function (c) {
         var d2 = E.deep(dim);
-        d2.rot = Math.abs(c.y - (a.y + b.y) / 2) > Math.abs(c.x - (a.x + b.x) / 2) ? 0 : Math.PI / 2;
+        d2.rot = giroPara(c);
         d2.p3 = c;
         return [d2];
       }
     });
     while (isKw(p3)) {
-      if (p3.kw === 'H') dim.rot = 0;
-      else if (p3.kw === 'V') dim.rot = Math.PI / 2;
-      else if (p3.kw === 'R') { var r = await ctx.getAngle('Precise ángulo de línea de cota', { def: 0 }); if (typeof r === 'number') dim.rot = r; }
+      if (p3.kw === 'H') { dim.rot = 0; dim.rotFijo = true; }
+      else if (p3.kw === 'V') { dim.rot = Math.PI / 2; dim.rotFijo = true; }
+      else if (p3.kw === 'R') { var r = await ctx.getAngle('Precise ángulo de línea de cota', { def: 0 }); if (typeof r === 'number') { dim.rot = r; dim.rotFijo = true; } }
       else if (p3.kw === 'T' || p3.kw === 'TM') {
         var s = await ctx.getString('Indique texto de cota', { allowNone: true });
         if (s) dim.textOverride = s;
@@ -96,7 +112,9 @@
       });
     }
     if (!pt(p3)) return;
-    if (dim.rot === 0 && Math.abs(p3.y - (a.y + b.y) / 2) < Math.abs(p3.x - (a.x + b.x) / 2)) dim.rot = Math.PI / 2;
+    /* si el usuario no ha forzado H, V o un ángulo, lo decide el punto */
+    if (!dim.rotFijo) dim.rot = giroPara(p3);
+    delete dim.rotFijo;               /* marca de trabajo, no del dibujo */
     dim.p3 = p3;
     ctx.doc.mark('ACOTALINEAL');
     ctx.doc.add(dim);
