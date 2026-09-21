@@ -714,6 +714,20 @@
     }
     if (p.opts.def !== undefined && p.opts.def !== null) {
       if (p.kind === 'keyword') { this.resolve({ kw: kwShort(p.opts.def), keyword: p.opts.def }); return; }
+      /* En una petición de punto o de número, un valor por defecto que es
+         una de las opciones anunciadas significa esa opción, no un valor.
+         Devolverlo tal cual metía la cadena donde se esperaba un punto: el
+         SCP se quedaba con un origen {x: undefined} y desde ese momento
+         todo lo que se tecleaba salía con coordenadas nulas. */
+      if (typeof p.opts.def === 'string' && p.opts.keywords && p.opts.keywords.length) {
+        var kws = p.opts.keywords;
+        for (var i = 0; i < kws.length; i++) {
+          if (norm(kws[i]) === norm(p.opts.def)) {
+            this.resolve({ kw: kwShort(kws[i]), keyword: kws[i] });
+            return;
+          }
+        }
+      }
       this.resolve(p.opts.def);
       return;
     }

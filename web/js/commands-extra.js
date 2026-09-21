@@ -285,6 +285,7 @@
       }
       return;
     }
+    if (!opt || !isFinite(opt.x) || !isFinite(opt.y)) { ctx.err('Punto no válido para el origen del SCP.'); return; }
     save();
     doc.vars.UCSORG = { x: opt.x, y: opt.y };
     ctx.out('Origen del SCP trasladado.');
