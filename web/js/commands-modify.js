@@ -1314,10 +1314,10 @@
         var c = chains[i], mv = merged.verts, cv = c.verts;
         var mEnd = mv[mv.length - 1], mStart = mv[0];
         var cStart = cv[0], cEnd = cv[cv.length - 1];
-        if (G.dist(mEnd, cStart) < tol) { merged.verts = mv.concat(cv.slice(1)); }
-        else if (G.dist(mEnd, cEnd) < tol) { merged.verts = mv.concat(reverseVerts(cv).slice(1)); }
-        else if (G.dist(mStart, cEnd) < tol) { merged.verts = cv.concat(mv.slice(1)); }
-        else if (G.dist(mStart, cStart) < tol) { merged.verts = reverseVerts(cv).concat(mv.slice(1)); }
+        if (G.dist(mEnd, cStart) < tol) { merged.verts = pega(mv, cv); }
+        else if (G.dist(mEnd, cEnd) < tol) { merged.verts = pega(mv, reverseVerts(cv)); }
+        else if (G.dist(mStart, cEnd) < tol) { merged.verts = pega(cv, mv); }
+        else if (G.dist(mStart, cStart) < tol) { merged.verts = pega(reverseVerts(cv), mv); }
         else continue;
         chains.splice(i, 1);
         progress = true; joined++;
@@ -1328,12 +1328,68 @@
     var closed = G.dist(merged.verts[0], merged.verts[merged.verts.length - 1]) < tol;
     if (closed) merged.verts.pop();
     var src = merged.ent;
+    var base = { layer: src.layer, color: src.color, ltype: src.ltype, lw: src.lw };
+    /* Varias rectas seguidas en la misma dirección son una sola recta, y
+       varios arcos del mismo círculo un solo arco —o un círculo, si se
+       cierra—.  Es lo que devuelve AutoCAD, en vez de una polilínea con
+       vértices de sobra. */
+    var res = null, nombre = 'polilínea';
+    if (closed) {
+      var ci = unSoloCirculo(merged.verts);
+      if (ci) { res = E.circle(ci.c, ci.r, base); nombre = 'círculo'; }
+    } else if (todoRecto(merged.verts)) {
+      res = E.line(merged.verts[0], merged.verts[merged.verts.length - 1], base);
+      nombre = 'línea';
+    } else {
+      var ar = unSoloArco(merged.verts);
+      if (ar) { res = E.arc(ar.c, ar.r, ar.a0, ar.a1, base); nombre = 'arco'; }
+    }
     ctx.doc.removeAll(usable.filter(function (e) { return !chains.some(function (c) { return c.ent === e; }); }));
-    ctx.doc.add(E.pline(merged.verts, closed, { layer: src.layer, color: src.color, ltype: src.ltype, lw: src.lw }));
-    ctx.out(joined + ' objeto(s) unido(s) en 1 polilínea.');
+    ctx.doc.add(res || E.pline(merged.verts, closed, base));
+    ctx.out(joined + ' objeto(s) unido(s) en 1 ' + nombre + '.');
     ctx.app.selSet = [];
     ctx.app.refresh();
   });
+  /* Empalme de dos cadenas por el vértice común.  El último vértice de
+     la primera lleva pandeo cero —es marca de fin— y el de la segunda
+     lleva el del tramo que empieza ahí: si no se traslada, al unir dos
+     arcos salía una polilínea con la cuerda en vez de la curva. */
+  function pega(a, b) {
+    var out = a.slice();
+    var u = out[out.length - 1];
+    if (!u.b && b[0].b) out[out.length - 1] = { x: u.x, y: u.y, b: b[0].b };
+    return out.concat(b.slice(1));
+  }
+
+  /* ¿todos los tramos son rectos y van en la misma dirección? */
+  function todoRecto(v) {
+    if (v.length < 2) return false;
+    var d0 = null;
+    for (var i = 0; i + 1 < v.length; i++) {
+      if (v[i].b) return false;
+      var d = G.norm(G.sub(v[i + 1], v[i]));
+      if (!isFinite(d.x) || !isFinite(d.y)) return false;
+      if (!d0) d0 = d;
+      else if (Math.abs(d.x * d0.y - d.y * d0.x) > 1e-9 || G.dot(d, d0) < 0) return false;
+    }
+    return !!d0;
+  }
+  /* ¿un contorno cerrado hecho de arcos del mismo círculo? */
+  function unSoloCirculo(v) {
+    if (v.length < 2) return null;
+    var c = null, r = 0, total = 0;
+    for (var i = 0; i < v.length; i++) {
+      var a = v[i], b = v[(i + 1) % v.length];
+      if (!a.b) return null;
+      var arc = G.bulgeArc(a, b, a.b);
+      if (!arc) return null;
+      if (c === null) { c = arc.c; r = arc.r; }
+      else if (Math.abs(arc.r - r) > Math.max(r, 1) * 1e-7 || G.dist(arc.c, c) > Math.max(r, 1) * 1e-7) return null;
+      total += Math.abs(arc.inc);
+    }
+    return Math.abs(total - G.TAU) < 1e-6 ? { c: c, r: r } : null;
+  }
+
   function reverseVerts(v) {
     var out = [];
     for (var i = v.length - 1; i >= 0; i--) {
