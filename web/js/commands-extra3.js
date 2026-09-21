@@ -581,10 +581,15 @@
     for (var i = 0; i < sol.length; i++) {
       var mesh = S.meshOf(sol[i]);
       if (!mesh) continue;
-      var inner = CSG.offsetMesh(mesh, -Math.abs(t));
-      if (!inner || !inner.faces.length) continue;
-      var res;
-      try { res = CSG.subtract(mesh, inner); } catch (err) { continue; }
+      var res = null;
+      try { res = CSG.shell(mesh, t); } catch (err) { res = null; }
+      if (!res) {
+        /* si el vaciado directo no vale (el desfase se cruza consigo
+           mismo) se intenta a la antigua, restando */
+        var inner = CSG.offsetMesh(mesh, -Math.abs(t));
+        if (!inner || !inner.faces.length) continue;
+        try { res = CSG.subtract(mesh, inner); } catch (err2) { continue; }
+      }
       if (!res || !res.faces.length) continue;
       var vOut = Math.abs(mesh.volume()), vRes = Math.abs(res.volume());
       if (vRes < 1e-9 || vRes >= vOut * 0.999) continue;

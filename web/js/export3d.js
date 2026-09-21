@@ -585,7 +585,12 @@
       mesh.faces.push([base, base + 1, base + 2]);
       off += 50;
     }
-    return mesh.weld(soldaduraPara(mesh)).clean();
+    /* Los triángulos muy finos NO se tiran: un STL binario guarda las
+       coordenadas en coma flotante de 32 bits, y al redondear ahí alguno
+       se queda sin área.  Quitarlo abre la malla —en una placa empalmada
+       eran dos triángulos y seis aristas sueltas—, mientras que dejarlo
+       no molesta a nadie: sigue formando parte de la superficie. */
+    return mesh.weld(soldaduraPara(mesh)).clean(true);
   };
   function readStlAscii(txt) {
     var mesh = new M.Mesh([], []);
@@ -599,7 +604,7 @@
         buf = [];
       }
     }
-    return mesh.verts.length ? mesh.weld(soldaduraPara(mesh)).clean() : null;
+    return mesh.verts.length ? mesh.weld(soldaduraPara(mesh)).clean(true) : null;
   }
 
   /* Lector de OBJ */
@@ -627,7 +632,7 @@
         if (!roto && f.length >= 3) mesh.faces.push(f);
       }
     }
-    return mesh.verts.length ? mesh.clean() : null;
+    return mesh.verts.length ? mesh.clean(true) : null;
   };
 
   /* Lector de PLY (ascii) */
@@ -1054,6 +1059,6 @@
     }
     if (!mesh.faces.length) return null;
     mesh.weld(soldaduraPara(mesh));
-    return mesh.clean();
+    return mesh.clean(true);
   }
 })();

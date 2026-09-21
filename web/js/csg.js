@@ -544,6 +544,66 @@
      desplazamiento por la normal.  Así una caja desfasada -3 da una caja
      exactamente 6 mm menor en cada dirección, cosa que el promedio de
      normales por vértice no consigue. */
+  /* Vaciado: la pared es el sólido exterior más el interior con las
+     caras del revés.  El interior está enteramente dentro y no toca al
+     exterior, así que no hace falta ningún booleano: basta con juntarlos,
+     y el resultado es exacto y siempre cerrado.  Restarlos con el BSP
+     fallaba justo en piezas con agujeros —el interior hereda el troceado
+     de caras del exterior y el recorte perdía polígonos: en una placa
+     taladrada se abrían seis aristas y faltaban 534 mm³. */
+  CSG.shell = function (mesh, t) {
+    if (!mesh || !mesh.faces.length) return null;
+    var g = Math.abs(t);
+    if (!(g > 1e-12)) return null;
+    var dentro = CSG.offsetMesh(mesh, -g);
+    if (!dentro || !dentro.faces.length) return null;
+    var c = M.check(dentro);
+    if (!c.estanco || !c.manifold) return null;
+    var vo = Math.abs(mesh.volume()), vi = Math.abs(dentro.volume());
+    if (!(vi > 1e-9) || vi >= vo * 0.9999) return null;
+    if (!cabeDentro(dentro, mesh, g)) return null;
+    var res = mesh.clone();
+    var hueco = dentro.clone();
+    hueco.flip();
+    res.append(hueco);
+    return res;
+  };
+
+  /* ¿la malla interior cabe holgadamente dentro de la exterior?  Se
+     comprueba por muestreo: si el desfase se ha pasado de grueso, el
+     interior se sale o se cruza consigo mismo y hay que renunciar. */
+  function cabeDentro(dentro, fuera, g) {
+    var b1 = dentro.bbox(), b2 = fuera.bbox();
+    var h = 1e-9;
+    if (b1.x1 < b2.x1 - h || b1.y1 < b2.y1 - h || b1.z1 < b2.z1 - h ||
+        b1.x2 > b2.x2 + h || b1.y2 > b2.y2 + h || b1.z2 > b2.z2 + h) return false;
+    var n = dentro.verts.length;
+    var paso = Math.max(1, Math.floor(n / 48));
+    for (var i = 0; i < n; i += paso)
+      if (!puntoDentro(fuera, dentro.verts[i])) return false;
+    return true;
+  }
+  /* Punto dentro de una malla cerrada: se cuentan los cortes de un rayo.
+     Si el rayo roza una arista se prueba otra dirección. */
+  function puntoDentro(mesh, p) {
+    var tris = mesh.triangles();
+    var dirs = [G3.v(0.5773, 0.5774, 0.5775), G3.v(-0.2673, 0.5345, 0.8018),
+                G3.v(0.8018, -0.2673, 0.5345)];
+    for (var d = 0; d < dirs.length; d++) {
+      var cortes = 0, dudoso = false;
+      for (var i = 0; i < tris.length; i++) {
+        var h = G3.rayTri(p, dirs[d], mesh.verts[tris[i][0]], mesh.verts[tris[i][1]],
+                          mesh.verts[tris[i][2]], true);
+        if (!h) continue;
+        if (h.t < 1e-9) { dudoso = true; break; }
+        cortes++;
+      }
+      if (!dudoso) return (cortes & 1) === 1;
+    }
+    return false;
+  }
+  CSG.puntoDentro = puntoDentro;
+
   CSG.offsetMesh = function (mesh, d) {
     var m = mesh.clone();
     var nf = m.faces.length, i, j;

@@ -88,7 +88,10 @@
       if (centered) org = { x: c0.x, y: c0.y };
       var e = S.solid({ op: 'box', l: L, w: W, h: H, centered: centered },
                       { layer: ctx.doc.vars.CLAYER });
-      e.m = G3.mTrans(org.x, org.y, z0(ctx) + (centered ? H / 2 : 0));
+      /* la Z de la esquina tecleada cuenta, como en AutoCAD; sin ella
+         se usa la elevación actual o el plano de trabajo */
+      e.m = coloca(ctx, { x: org.x, y: org.y, z: c0.z });
+      if (centered) e.m = G3.mMul(e.m, G3.mTrans(0, 0, H / 2));
       addSolid(ctx, e);
       ctx.out('Prisma ' + G.fmt(L, 3) + ' × ' + G.fmt(W, 3) + ' × ' + G.fmt(H, 3) +
               '   volumen ' + G.fmt(L * W * H, 3));
@@ -213,7 +216,7 @@
     if (base.elipse) {
       e = S.solid({ op: 'extrude', prof: base.elipse, dir: { x: 0, y: 0, z: h } },
                   { layer: ctx.doc.vars.CLAYER });
-      e.m = G3.mTrans(0, 0, z0(ctx));
+      e.m = coloca(ctx, { x: 0, y: 0, z: base.c && base.c.z });
       addSolid(ctx, e);
       ctx.out('Cilindro elíptico de altura ' + G.fmt(h, 3));
       return;
@@ -263,7 +266,7 @@
       });
       e = S.solid({ op: 'loft', secs: [base.elipse, top], opts: { closedSections: true } },
                   { layer: ctx.doc.vars.CLAYER });
-      e.m = G3.mTrans(0, 0, z0(ctx));
+      e.m = coloca(ctx, { x: 0, y: 0, z: base.c && base.c.z });
       addSolid(ctx, e);
       ctx.out((rTop ? 'Tronco de cono elíptico' : 'Cono elíptico') + ' de altura ' + G.fmt(h, 3));
       return;
@@ -292,7 +295,8 @@
     if (!num(h)) return;
     ctx.doc.mark('CUNA');
     var e = S.solid({ op: 'wedge', l: l, w: w, h: h, centered: centered }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(centered ? c0.x : Math.min(c0.x, r1.x), centered ? c0.y : Math.min(c0.y, r1.y), z0(ctx));
+    e.m = coloca(ctx, { x: centered ? c0.x : Math.min(c0.x, r1.x),
+                        y: centered ? c0.y : Math.min(c0.y, r1.y), z: c0.z });
     addSolid(ctx, e);
     ctx.out('Cuña ' + G.fmt(l, 3) + ' × ' + G.fmt(w, 3) + ' × ' + G.fmt(h, 3));
   });
@@ -347,7 +351,7 @@
     if (!num(h)) return;
     ctx.doc.mark('PIRAMIDE');
     var e = S.solid({ op: 'pyramid', r: r, h: h, sides: sides, r2: rTop }, { layer: ctx.doc.vars.CLAYER });
-    e.m = G3.mTrans(c.x, c.y, z0(ctx));
+    e.m = coloca(ctx, c);
     addSolid(ctx, e);
     ctx.out('Pirámide de ' + sides + ' lados, R' + G.fmt(r, 3) + ' × ' + G.fmt(h, 3));
   });
@@ -608,6 +612,18 @@
 
   /* Índice de la cara señalada: con el rayo del cursor si estamos en 3D,
      y si no, la cara más cercana al punto de designación. */
+  /* El centro de un taladro o de un saliente tiene que caer sobre la
+     cara.  Dentro del espacio 3D lo tecleado ya viene en coordenadas del
+     plano de trabajo, pero desde la vista 2D son coordenadas del dibujo
+     y nadie pone la Z: el punto se proyecta sobre el plano de la cara. */
+  function sobreLaCara(p, pl) {
+    var q = v3(p.x, p.y, p.z === undefined ? 0 : p.z);
+    var n = v3(pl.n.x, pl.n.y, pl.n.z);
+    var w = G3.dot(n, v3(pl.org.x, pl.org.y, pl.org.z));
+    var d = G3.dot(n, q) - w;
+    return Math.abs(d) < 1e-9 ? q : G3.sub(q, G3.mul(n, d));
+  }
+
   function caraSenalada(ctx, ent, mesh, r) {
     var app = ctx.app;
     if (app.is3D && app.view3d && app.cursorScreen) {
@@ -1436,7 +1452,7 @@
     var diag = G3.boxDiag(bb) + 10;
     var pasante = !prof;
     var L = pasante ? diag * 1.2 : prof;
-    var cen = v3(centro.x, centro.y, centro.z || 0);
+    var cen = sobreLaCara(centro, plCara);
 
     /* el taladro se construye en local (eje Z) y se coloca con la matriz
        del plano de la cara, entrando hacia dentro del material */
@@ -1550,7 +1566,7 @@
     var nodo = { hist: { op: 'mesh',
                          verts: body.verts.map(function (q) { return { x: q.x, y: q.y, z: q.z }; }),
                          faces: body.faces.map(function (x) { return x.slice(); }) },
-                 m: W.matrixAt(plCara, v3(centro.x, centro.y, centro.z || 0)), nombre: nombre };
+                 m: W.matrixAt(plCara, sobreLaCara(centro, plCara)), nombre: nombre };
     var e2 = S.solid({ op: 'bool', kind: 'union', nodes: [S.nodeOf(ent), nodo] },
                      { layer: ent.layer, color: ent.color });
     var res = S.meshOf(e2);
