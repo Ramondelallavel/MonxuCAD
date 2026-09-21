@@ -1134,7 +1134,10 @@
       var d = { _codes: [] };
       while (j < to && pairs[j][0] !== 0) { d._codes.push(pairs[j]); j++; }
       var ent = null;
-      try { ent = buildEntity(type, d._codes, pairs, i, to, doc); } catch (err) { ent = null; }
+      try {
+        ent = buildEntity(type, d._codes, pairs, i, to, doc);
+        ent = aplicaOCS(ent, d._codes, doc);
+      } catch (err) { ent = null; }
       if (ent) {
         /* Un archivo de otro programa puede venir con coordenadas rotas.
            Dejar entrar un NaN o un infinito envenena la extensión del
@@ -1319,6 +1322,187 @@
     return E.pline(pts, true, o);
   }
 
+  /* ------------------------------------------------------------
+     Contornos de un sombreado
+
+     Un contorno de HATCH viene de dos maneras: como polilínea —con sus
+     bulges— o como una lista de bordes sueltos, y cada borde puede ser
+     una recta, un arco, un arco de elipse o una spline.  Aquí se leían
+     sólo las parejas 10/20 de cualquier cosa, así que:
+
+       · un sombreado con el contorno circular —lo más corriente del
+         mundo— se quedaba con un único punto, el centro del círculo, y
+         como con menos de tres puntos no hay contorno, se perdía el
+         sombreado entero;
+       · una polilínea con bulges perdía las curvas;
+       · lo mismo con las elipses y las splines.
+
+     Ahora cada tipo de borde se convierte en los puntos que le
+     corresponden.
+     ------------------------------------------------------------ */
+  function arcoPts(c, r, a0, a1, ccw, salida) {
+    var sw = ccw ? G.sweep(a0, a1) : -G.sweep(a1, a0);
+    if (Math.abs(sw) < 1e-9) sw = ccw ? G.TAU : -G.TAU;
+    var n = Math.max(6, Math.ceil(Math.abs(sw) / G.TAU * 64));
+    for (var i = 0; i <= n; i++) {
+      var t = a0 + sw * i / n;
+      salida.push({ x: c.x + r * Math.cos(t), y: c.y + r * Math.sin(t) });
+    }
+  }
+
+  function elipsePts(c, maj, ratio, a0, a1, ccw, salida) {
+    var sw = ccw ? G.sweep(a0, a1) : -G.sweep(a1, a0);
+    if (Math.abs(sw) < 1e-9) sw = ccw ? G.TAU : -G.TAU;
+    var n = Math.max(8, Math.ceil(Math.abs(sw) / G.TAU * 96));
+    for (var i = 0; i <= n; i++)
+      salida.push(G.ellPt(c, maj.x, maj.y, ratio, a0 + sw * i / n));
+  }
+
+  /* ------------------------------------------------------------
+     Sistema de coordenadas del objeto (OCS)
+
+     Una entidad plana no guarda sus puntos en el sistema del dibujo sino
+     en el suyo, definido por la dirección de extrusión (210/220/230).
+     Cuando vale (0,0,1) —lo normal— coinciden y no hay nada que hacer,
+     pero AutoCAD escribe (0,0,-1) en cuanto algo se simetriza o se
+     dibuja con un SCP volteado, y entonces la X va al revés.  Sin esto,
+     parte de la geometría de un plano ajeno aparecía en espejo y en otro
+     sitio, sin que nada avisara.
+
+     La base se saca con el algoritmo del eje arbitrario, que es el que
+     manda el formato. ------------------------------------------------------------ */
+  function cruz3(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+  function norm3(a) {
+    var l = Math.hypot(a[0], a[1], a[2]);
+    return l < 1e-12 ? [0, 0, 0] : [a[0] / l, a[1] / l, a[2] / l];
+  }
+
+  function aplicaOCS(ent, codes, doc) {
+    if (!ent) return ent;
+    var ez = get(codes, 230, 1), ex = get(codes, 210, 0), ey = get(codes, 220, 0);
+    if (Math.abs(ex) < 1e-12 && Math.abs(ey) < 1e-12 && ez >= 0) return ent;
+    var az = norm3([ex, ey, ez]);
+    if (!az[0] && !az[1] && !az[2]) return ent;
+    var ax = norm3(Math.abs(az[0]) < 1 / 64 && Math.abs(az[1]) < 1 / 64
+      ? cruz3([0, 1, 0], az) : cruz3([0, 0, 1], az));
+    if (!ax[0] && !ax[1] && !ax[2]) return ent;
+    var ay = norm3(cruz3(az, ax));
+    var m = G.M(ax[0], ax[1], ay[0], ay[1], 0, 0);
+    if (Math.abs(G.mDet(m)) < 1e-12) return ent;
+    var lista = Array.isArray(ent) ? ent : [ent];
+    for (var i = 0; i < lista.length; i++) {
+      var x = lista[i];
+      /* los sólidos y las mallas ya vienen en tres dimensiones */
+      if (!x || x.type === 'SOLID3D' || x.type === 'MESH') continue;
+      try { E.transform(x, m, doc); } catch (e) { }
+    }
+    return ent;
+  }
+
+  function contornosHatch(codes) {
+    var loops = [], i, c, v;
+    var pathFlag = null, esPoli = false, cerrada = true;
+    var pts = null;          /* puntos del contorno en curso */
+    var borde = null;        /* códigos del borde en curso */
+    var poliVerts = null, pendiente = null;
+
+    function cierraBorde() {
+      if (!borde || !pts) { borde = null; return; }
+      var t = borde.tipo;
+      var q = function (k, d) { return borde[k] === undefined ? d : borde[k]; };
+      if (t === 1) {
+        pts.push({ x: q(10, 0), y: q(20, 0) });
+        pts.push({ x: q(11, 0), y: q(21, 0) });
+      } else if (t === 2) {
+        arcoPts({ x: q(10, 0), y: q(20, 0) }, q(40, 1),
+                G.rad(q(50, 0)), G.rad(q(51, 360)), q(73, 1) !== 0, pts);
+      } else if (t === 3) {
+        elipsePts({ x: q(10, 0), y: q(20, 0) }, { x: q(11, 1), y: q(21, 0) }, q(40, 1),
+                  G.rad(q(50, 0)), G.rad(q(51, 360)), q(73, 1) !== 0, pts);
+      } else if (t === 4 && borde.ctrl && borde.ctrl.length >= 2) {
+        var nb = E.splineNurbs({ ctrl: borde.ctrl, knots: borde.knots, degree: borde.grado || 3,
+                                 weights: borde.pesos });
+        var sp = nb ? E.nurbsPts(nb) : borde.ctrl;
+        for (var k = 0; k < sp.length; k++) pts.push({ x: sp[k].x, y: sp[k].y });
+      }
+      borde = null;
+    }
+
+    function cierraPoli() {
+      if (!poliVerts || !pts) { poliVerts = null; return; }
+      var n = poliVerts.length, last = cerrada ? n : n - 1;
+      for (var k = 0; k < last; k++) {
+        var a = poliVerts[k], b = poliVerts[(k + 1) % n];
+        pts.push({ x: a.x, y: a.y });
+        if (a.b) {
+          var arc = G.bulgeArc(a, b, a.b);
+          if (arc) {
+            var tmp = [];
+            arcoPts(arc.c, arc.r, arc.a0, arc.a1, arc.ccw, tmp);
+            for (var j = 1; j < tmp.length - 1; j++) pts.push(tmp[j]);
+          }
+        }
+      }
+      if (!cerrada && n) pts.push({ x: poliVerts[n - 1].x, y: poliVerts[n - 1].y });
+      poliVerts = null;
+    }
+
+    function cierraPath() {
+      cierraBorde();
+      cierraPoli();
+      if (pts) {
+        /* se quitan los puntos repetidos que dejan los bordes al
+           encadenarse: el final de uno es el principio del siguiente */
+        var limpio = [];
+        for (var k = 0; k < pts.length; k++) {
+          var p = pts[k];
+          if (!limpio.length || G.dist(limpio[limpio.length - 1], p) > 1e-9) limpio.push(p);
+        }
+        while (limpio.length > 2 && G.dist(limpio[0], limpio[limpio.length - 1]) < 1e-9) limpio.pop();
+        if (limpio.length > 2) loops.push(limpio);
+      }
+      pts = null;
+    }
+
+    for (i = 0; i < codes.length; i++) {
+      c = codes[i][0]; v = codes[i][1];
+      if (c === 92) {
+        cierraPath();
+        pathFlag = v | 0;
+        esPoli = !!(pathFlag & 2);
+        cerrada = true;
+        pts = [];
+        poliVerts = esPoli ? [] : null;
+        pendiente = null;
+        continue;
+      }
+      if (pts === null) continue;
+      if (c === 97 || c === 330) { cierraPath(); continue; }
+      if (esPoli) {
+        if (c === 73) { cerrada = v !== 0; continue; }
+        if (c === 10) { pendiente = v; continue; }
+        if (c === 20) { if (pendiente !== null) { poliVerts.push({ x: pendiente, y: v, b: 0 }); pendiente = null; } continue; }
+        if (c === 42 && poliVerts.length) { poliVerts[poliVerts.length - 1].b = v; continue; }
+        continue;
+      }
+      if (c === 72) { cierraBorde(); borde = { tipo: v | 0, ctrl: [], knots: [], pesos: [] }; continue; }
+      if (!borde) continue;
+      if (borde.tipo === 4) {
+        if (c === 94) borde.grado = v | 0;
+        else if (c === 40) borde.knots.push(v);
+        else if (c === 10) pendiente = v;
+        else if (c === 20) { if (pendiente !== null) { borde.ctrl.push({ x: pendiente, y: v }); pendiente = null; } }
+        else if (c === 42) borde.pesos.push(v);
+        continue;
+      }
+      if (borde[c] === undefined) borde[c] = v;
+    }
+    cierraPath();
+    return loops;
+  }
+
   function buildEntity(type, codes, pairs, idx, to, doc) {
     var o = common(codes);
     switch (type) {
@@ -1471,20 +1655,9 @@
         return E.solid(pts, o);
       }
       case 'HATCH': {
-        var loops = [], curLoop = null, mode = 0;
-        var px = null;
         var pattern = String(get(codes, 2, 'ANSI31'));
         var isSolid = !!get(codes, 70, 0);
-        for (var z = 0; z < codes.length; z++) {
-          var cc = codes[z][0], vv = codes[z][1];
-          if (cc === 92) { if (curLoop && curLoop.length > 2) loops.push(curLoop); curLoop = []; mode = 1; px = null; }
-          else if (cc === 93) { /* número de vértices */ }
-          else if (cc === 10 && mode === 1) px = vv;
-          else if (cc === 20 && mode === 1 && px !== null) { curLoop.push({ x: px, y: vv }); px = null; }
-          else if (cc === 97) { if (curLoop && curLoop.length > 2) { loops.push(curLoop); } curLoop = null; mode = 0; }
-          else if (cc === 75) mode = 0;
-        }
-        if (curLoop && curLoop.length > 2) loops.push(curLoop);
+        var loops = contornosHatch(codes);
         if (!loops.length) return null;
         var ha2 = E.hatch(loops, o);
         ha2.pattern = isSolid ? 'SOLID' : pattern;
