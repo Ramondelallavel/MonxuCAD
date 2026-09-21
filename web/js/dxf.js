@@ -953,7 +953,12 @@
         else if (c === 6) rec.ltype = String(v);
         else if (c === 370) rec.lw = v;
         else if (c === 290) rec.plot = !!v;
-        else if (c === 3) rec.desc = String(v);
+        /* en un estilo de texto el grupo 3 es el fichero de fuente, no
+           una descripción: como se guardaba siempre en `desc`, ningún
+           estilo importado conservaba su tipo de letra y todos salían
+           con la de palotes */
+        else if (c === 3) { if (rec.t === 'STYLE') rec.font = String(v); else rec.desc = String(v); }
+        else if (c === 4 && rec.t === 'STYLE') rec.bigfont = String(v);
         else if (c === 49) { (rec.pat = rec.pat || []).push(v); }
         else if (c === 40) rec.h = v;
         else if (c === 41) rec.wfac = v;
@@ -979,9 +984,9 @@
           }
         } else if (rec.t === 'STYLE') {
           doc.textStyles[rec.name] = {
-            name: rec.name, font: rec.font || 'txt.shx', h: rec.h || 0,
-            wfac: rec.wfac || 1, oblique: rec.oblique || 0,
-            css: /arial|simplex|romans|isocp/i.test(rec.font || '') ? 'Arial' : 'AcadStick'
+            name: rec.name, font: rec.font || 'txt.shx', bigfont: rec.bigfont || '',
+            h: rec.h || 0, wfac: rec.wfac || 1, oblique: rec.oblique || 0,
+            css: fuenteCss(rec.font)
           };
         } else if (rec.t === 'DIMSTYLE') {
           var ds = E.defaultDimStyle(rec.name);
@@ -1193,6 +1198,23 @@
     for (var i = 0; i < codes.length; i++) if (codes[i][0] === code) o.push(codes[i][1]);
     return o;
   }
+  /* A qué familia del navegador se parece cada fuente de AutoCAD.  Las
+     .shx de trazos van con la de palotes; las de verdad, con la suya. */
+  function fuenteCss(f) {
+    var n = String(f || '').toLowerCase();
+    if (/arial/.test(n)) return 'Arial';
+    if (/times|romant/.test(n)) return 'Times New Roman';
+    if (/courier|monotxt/.test(n)) return 'Courier New';
+    if (/verdana/.test(n)) return 'Verdana';
+    if (/tahoma/.test(n)) return 'Tahoma';
+    if (/calibri/.test(n)) return 'Calibri';
+    if (/century|cityblueprint/.test(n)) return 'Century Gothic';
+    /* las de trazos más corrientes se ven bien con una sans normal */
+    if (/simplex|romans|isocp|iso3098|gothic|txt/.test(n)) return 'AcadStick';
+    if (/\.ttf$/.test(n)) return f.replace(/\.ttf$/i, '');
+    return 'AcadStick';
+  }
+
   function common(codes) {
     var o = { layer: String(get(codes, 8, '0')), ltscale: get(codes, 48, 1) };
     var c = get(codes, 62, undefined);
@@ -1626,7 +1648,23 @@
         var ins = E.insert(String(get(codes, 2, '')), { x: get(codes, 10, 0), y: get(codes, 20, 0) }, o);
         ins.sx = get(codes, 41, 1); ins.sy = get(codes, 42, 1);
         ins.rot = G.rad(get(codes, 50, 0));
-        return ins;
+        /* Una inserción puede traer su propia matriz (filas y columnas);
+           se reparte en inserciones sueltas, que es lo que se puede
+           editar después una a una.  El paso va por los ejes girados,
+           como en AutoCAD. */
+        var cols = Math.max(1, get(codes, 70, 1) | 0);
+        var rows = Math.max(1, get(codes, 71, 1) | 0);
+        if (cols === 1 && rows === 1) return ins;
+        var dc = get(codes, 44, 0), dr = get(codes, 45, 0);
+        if (cols * rows > 10000) return ins;     /* algo va mal en el fichero */
+        var co = Math.cos(ins.rot), si = Math.sin(ins.rot), salida = [];
+        for (var fr = 0; fr < rows; fr++) for (var cl = 0; cl < cols; cl++) {
+          var dx = cl * dc, dy = fr * dr;
+          var q = E.deep(ins);
+          q.p = { x: ins.p.x + dx * co - dy * si, y: ins.p.y + dx * si + dy * co };
+          salida.push(q);
+        }
+        return salida;
       }
       case 'SOLID': case 'TRACE': case '3DFACE': {
         var q0 = { x: get(codes, 10, 0), y: get(codes, 20, 0) };
