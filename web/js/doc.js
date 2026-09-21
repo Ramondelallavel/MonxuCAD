@@ -851,7 +851,7 @@
   E.textWidth = function (ent, doc) {
     var st = (doc && doc.textStyles[ent.style]) || { wfac: 1 };
     var f = (ent.wfac || 1) * (st.wfac || 1);
-    return ent.text.length * ent.h * 0.62 * f;
+    return E.anchoTexto(E.textoVisible(ent.text), ent.h) * f;
   };
   E.textOrigin = function (ent, w, h) {
     var x = ent.p.x, y = ent.p.y;
@@ -864,14 +864,66 @@
     var dx = x - ent.p.x, dy = y - ent.p.y;
     return { x: ent.p.x + dx * c - dy * s, y: ent.p.y + dx * s + dy * c };
   };
-  E.mtextLines = function (ent) {
-    var raw = String(ent.text || '').replace(/\\P/g, '\n').replace(/\\[A-Za-z][^;\\]*;/g, '');
-    return raw.split('\n');
+  /* ------------------------------------------------------------
+     Los códigos de porcentaje se escriben tal cual y se VEN como el
+     símbolo: AutoCAD los interpreta al dibujar, no al guardar, y la
+     gente los teclea a diario —%%c50 para Ø50—.  Aquí no se tocaban y
+     el dibujo mostraba el código en crudo.
+     ------------------------------------------------------------ */
+  E.textoVisible = function (s) {
+    var t = String(s === undefined || s === null ? '' : s);
+    if (t.indexOf('%%') < 0) return t;
+    return t.replace(/%%(\d{3})/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); })
+            .replace(/%%[dD]/g, '°').replace(/%%[cC]/g, 'Ø').replace(/%%[pP]/g, '±')
+            .replace(/%%[uUoO]/g, '').replace(/%%%/g, '%');
+  };
+
+  /* Ancho aproximado de una cadena a una altura dada.  Es la misma
+     estimación que usa la acotación; se comparte para que la caja de un
+     texto y el hueco que le reserva una cota no se contradigan. */
+  E.anchoTexto = function (txt, h) { return String(txt).length * h * 0.62; };
+
+  /* Reparte un párrafo en líneas que quepan en el ancho dado.
+
+     Un MTEXT con ancho definido se parte solo: AutoCAD lo hace y por eso
+     el ancho está en el fichero.  Aquí no se partía, así que un párrafo
+     importado salía en una sola línea que se iba del cajetín y del
+     plano. */
+  E.mtextWrap = function (lineas, ancho, h) {
+    if (!(ancho > 0)) return lineas;
+    var out = [];
+    lineas.forEach(function (l) {
+      if (!l) { out.push(''); return; }
+      var trozos = String(l).split(/(\s+)/), cur = '';
+      for (var i = 0; i < trozos.length; i++) {
+        var w = trozos[i];
+        if (/^\s+$/.test(w)) { if (cur) cur += w; continue; }
+        /* una palabra más larga que el ancho se parte por donde toque */
+        while (E.anchoTexto(w, h) > ancho && w.length > 1) {
+          var caben = Math.max(1, Math.floor(ancho / (h * 0.62)));
+          if (cur) { out.push(cur.replace(/\s+$/, '')); cur = ''; }
+          out.push(w.slice(0, caben));
+          w = w.slice(caben);
+        }
+        if (cur && E.anchoTexto(cur + w, h) > ancho) {
+          out.push(cur.replace(/\s+$/, ''));
+          cur = w;
+        } else cur += w;
+      }
+      out.push(cur.replace(/\s+$/, ''));
+    });
+    return out;
+  };
+
+  E.mtextLines = function (ent, doc) {
+    var raw = E.textoVisible(ent.text).replace(/\\P/g, '\n').replace(/\\[A-Za-z][^;\\]*;/g, '');
+    var lineas = raw.split('\n');
+    return E.mtextWrap(lineas, ent.width, ent.h);
   };
   E.mtextLayout = function (ent, doc) {
-    var lines = E.mtextLines(ent);
+    var lines = E.mtextLines(ent, doc);
     var maxw = 0;
-    lines.forEach(function (l) { maxw = Math.max(maxw, l.length * ent.h * 0.62); });
+    lines.forEach(function (l) { maxw = Math.max(maxw, E.anchoTexto(l, ent.h)); });
     var w = ent.width > 0 ? ent.width : maxw;
     var lh = ent.h * 1.4 * (ent.lineSpace || 1);
     var h = lines.length * lh;

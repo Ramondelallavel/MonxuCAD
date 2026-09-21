@@ -1583,13 +1583,35 @@
     }
   }
 
+  /* Texto con formato de AutoCAD a texto llano.
+
+     El barrido de códigos era demasiado goloso: el patrón que borra
+     «\f...;» se llevaba por delante también «\S+0,05^-0,05;», que no es
+     formato sino contenido —una tolerancia apilada—, y la dejaba en
+     nada.  Los caracteres escritos como \U+00B0 tampoco se traducían.
+     Se resuelven primero las fracciones y los escapes, y sólo después
+     se barre lo que de verdad es formato. */
   function unescapeTxt(s) {
-    return String(s)
-      .replace(/\\P/g, '\n')
-      .replace(/\\[A-Za-z][^;\\]*;/g, '')
-      .replace(/[{}]/g, '')
-      .replace(/%%d/gi, '°').replace(/%%c/gi, 'Ø').replace(/%%p/gi, '±')
-      .replace(/%%%/g, '%');
+    var t = String(s === undefined || s === null ? '' : s);
+    /* los escapes de barra se apartan para que no los pise nada */
+    t = t.replace(/\\\\/g, '\u0001').replace(/\\\{/g, '\u0002').replace(/\\\}/g, '\u0003');
+    t = t.replace(/\\P/g, '\n').replace(/\\p[^;]*;/g, '\n').replace(/\\~/g, ' ');
+    /* fracciones apiladas: numerador, separador ^ / o #, denominador */
+    t = t.replace(/\\S([^;]*);/g, function (_, cuerpo) {
+      var m = cuerpo.match(/^(.*?)[\^#\/](.*)$/);
+      if (!m) return cuerpo;
+      if (!m[2]) return m[1];
+      if (!m[1]) return m[2];
+      return m[1] + '/' + m[2];
+    });
+    t = t.replace(/\\U\+([0-9A-Fa-f]{4})/g, function (_, h) { return String.fromCharCode(parseInt(h, 16)); });
+    t = t.replace(/\\M\+[0-9A-Fa-f]{5}/g, '');
+    /* ahora sí, los códigos de formato y las llaves de agrupación */
+    t = t.replace(/\\[A-Za-z][^;\\]*;/g, '').replace(/\\[LlOoKk]/g, '').replace(/[{}]/g, '');
+    t = t.replace(/%%(\d{3})/g, function (_, n) { return String.fromCharCode(parseInt(n, 10)); })
+         .replace(/%%[dD]/g, '°').replace(/%%[cC]/g, 'Ø').replace(/%%[pP]/g, '±')
+         .replace(/%%[uUoO]/g, '').replace(/%%%/g, '%');
+    return t.replace(/\u0001/g, '\\').replace(/\u0002/g, '{').replace(/\u0003/g, '}');
   }
   DXF.unescapeTxt = unescapeTxt;
 })();

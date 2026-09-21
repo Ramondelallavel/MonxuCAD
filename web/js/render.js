@@ -835,8 +835,9 @@
     ctx.fillStyle = col;
     ctx.textAlign = ent.halign === 1 || ent.halign === 4 ? 'center' : ent.halign === 2 ? 'right' : 'left';
     ctx.textBaseline = ent.valign === 3 ? 'top' : ent.valign === 2 ? 'middle' : ent.valign === 1 ? 'bottom' : 'alphabetic';
-    ctx.fillText(ent.text, 0, 0);
-    if (o && o.hl) { ctx.globalAlpha = 0.35; ctx.fillText(ent.text, 0, 0); }
+    var vis = E.textoVisible(ent.text);
+    ctx.fillText(vis, 0, 0);
+    if (o && o.hl) { ctx.globalAlpha = 0.35; ctx.fillText(vis, 0, 0); }
     ctx.restore();
   };
 
@@ -859,20 +860,16 @@
     ctx.fillStyle = col;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
+    /* El reparto en líneas lo hace ya el modelo, con la misma medida que
+       usa la caja del objeto.  Antes se repartía aquí, con las métricas
+       reales de la fuente: el texto se veía en cinco líneas y la caja
+       seguía siendo de una, así que la extensión del dibujo, el zoom y
+       la designación por ventana no cuadraban con lo que se veía. */
     var lhp = lay.lh * this.view.zoom;
-    var maxW = ent.width > 0 ? ent.width * this.view.zoom : Infinity;
     var y = lhp * 0.82;
     for (var i = 0; i < lay.lines.length; i++) {
-      var line = lay.lines[i];
-      if (maxW < Infinity && ctx.measureText(line).width > maxW) {
-        var words = line.split(' '), cur = '';
-        for (var w = 0; w < words.length; w++) {
-          var t = cur ? cur + ' ' + words[w] : words[w];
-          if (ctx.measureText(t).width > maxW && cur) { ctx.fillText(cur, 0, y); y += lhp; cur = words[w]; }
-          else cur = t;
-        }
-        ctx.fillText(cur, 0, y); y += lhp;
-      } else { ctx.fillText(line, 0, y); y += lhp; }
+      ctx.fillText(lay.lines[i], 0, y);
+      y += lhp;
     }
     ctx.restore();
   };

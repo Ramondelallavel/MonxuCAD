@@ -68,7 +68,9 @@
     if (a.dot) geo.dots.push(a.dot);
   }
 
-  D.textWidth = function (txt, h) { return String(txt).length * h * 0.62; };
+  /* la misma estimación que usa el resto del programa: si la cota y el
+     texto no miden igual, el hueco que se reserva no cuadra */
+  D.textWidth = function (txt, h) { return E.anchoTexto(E.textoVisible(txt), h); };
 
   /* ============================================================
      Constructor principal
