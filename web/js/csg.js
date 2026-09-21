@@ -526,16 +526,6 @@
     return res;   /* el redondeo booleano completo se hace en commands-3d */
   };
 
-  /* ---------- Vaciado (SHELL / VACIAR) ---------- */
-  CSG.shell = function (mesh, thickness) {
-    var outer = mesh.clone();
-    var inner = CSG.offsetMesh(mesh, -Math.abs(thickness));
-    if (!inner) return null;
-    inner.flip();
-    var r = CSG.subtract(outer, CSG.offsetMesh(mesh, -Math.abs(thickness)));
-    return r;
-  };
-
   /* Desfase de malla exacto para caras planas.
      Cada cara define un plano; al desfasarlo una distancia d, el vértice
      nuevo es la intersección de los planos desfasados de sus caras.  Con
@@ -543,7 +533,9 @@
      recta (se toma el punto más cercano al original) y con uno el simple
      desplazamiento por la normal.  Así una caja desfasada -3 da una caja
      exactamente 6 mm menor en cada dirección, cosa que el promedio de
-     normales por vértice no consigue. */
+     normales por vértice no consigue.  Está más abajo, justo encima de
+     CSG.offsetMesh. */
+
   /* Vaciado: la pared es el sólido exterior más el interior con las
      caras del revés.  El interior está enteramente dentro y no toca al
      exterior, así que no hace falta ningún booleano: basta con juntarlos,

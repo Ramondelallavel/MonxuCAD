@@ -1101,16 +1101,164 @@
         }
       }
       sec.push(P2);
+      /* Orden canónico: la esquina primero y siempre girando igual
+         respecto de +t.  La cadena lo necesita para casar cada punto de
+         una sección con el suyo en la siguiente; según qué cara de la
+         arista viniera antes, el recorrido salía al revés. */
+      var canon = sec.slice();
+      if (G3.dot(G3.polyNormal(canon), t) < 0)
+        canon = [canon[0]].concat(canon.slice(1).reverse());
       /* la sección tiene que recorrerse en sentido coherente con +t */
       if (G3.dot(G3.polyNormal(sec), t) < 0) sec.reverse();
       /* extrusión con un pelín de holgura para que las esquinas casen */
       var ov = Math.max(size, dist) * 0.02 + 1e-6;
       var prism = M.extrude(sec.map(function (q) { return G3.sub(q, G3.mul(t, ov)); }),
                             G3.mul(t, L + ov * 2));
-      if (prism && prism.faces.length) out.push({ mesh: prism, a: e.a, b: e.b, suma: !convexa });
+      if (prism && prism.faces.length)
+        out.push({ mesh: prism, a: e.a, b: e.b, suma: !convexa,
+                   sec: canon, t: t, L: L, ov: ov, pa: G3.copy(a), pb: G3.copy(b) });
     }
     if (informe) informe.concavas = concavas;
     return out;
+  }
+
+  /* ------------------------------------------------------------
+     Herramienta de una cadena, hecha de una pieza.
+
+     Unir los prismas de arista en arista con booleanos dejaba cuñas sin
+     cubrir en cada recodo: en el borde de un taladro salía una corona de
+     aletas triangulares.  Cuando la cadena es una sola línea —abierta o
+     cerrada, que es el caso de cualquier borde de taladro o de cilindro—
+     no hace falta ningún booleano: se lleva la sección a lo largo de la
+     cadena partiendo por la bisectriz en cada recodo, como una moldura
+     ingletada, y el tubo sale cerrado por construcción.
+     ------------------------------------------------------------ */
+  function tuboCadena(items) {
+    if (items.length < 2) return null;
+    var n0 = items[0].sec && items[0].sec.length;
+    if (!n0 || n0 < 3) return null;
+    var enV = {}, i, j;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i];
+      if (!it.sec || it.sec.length !== n0) return null;
+      (enV[it.a] || (enV[it.a] = [])).push(i);
+      (enV[it.b] || (enV[it.b] = [])).push(i);
+    }
+    var sueltos = [];
+    for (var k in enV) {
+      if (enV[k].length > 2) return null;          /* bifurcación: no es una línea */
+      if (enV[k].length === 1) sueltos.push(+k);
+    }
+    if (sueltos.length !== 0 && sueltos.length !== 2) return null;
+    var cerrada = sueltos.length === 0;
+
+    /* orden de recorrido */
+    var usada = new Array(items.length).fill(false);
+    var arranque = cerrada ? items[0].a : sueltos[0];
+    var orden = [], vert = [arranque], v = arranque, guard = 0;
+    while (guard++ <= items.length) {
+      var cand = (enV[v] || []).filter(function (q) { return !usada[q]; });
+      if (!cand.length) break;
+      var q2 = cand[0];
+      usada[q2] = true;
+      var it2 = items[q2];
+      var haciaB = (it2.a === v);
+      orden.push({ it: it2, haciaB: haciaB });
+      v = haciaB ? it2.b : it2.a;
+      vert.push(v);
+    }
+    if (orden.length !== items.length) return null;
+    if (cerrada && v !== arranque) return null;
+
+    /* dirección de recorrido y sección de cada tramo, en el sentido bueno */
+    var dirs = [], secs = [], org = [];
+    for (i = 0; i < orden.length; i++) {
+      var o = orden[i], t = o.haciaB ? o.it.t : G3.neg(o.it.t);
+      dirs.push(t);
+      /* la sección va anclada en el extremo de partida del tramo */
+      var base = o.haciaB ? o.it.pa : o.it.pb;
+      var desp = o.haciaB ? null : G3.mul(o.it.t, o.it.L);
+      var ss = o.it.sec.map(function (p) { return desp ? G3.add(p, desp) : G3.copy(p); });
+      /* recorriendo el tramo al revés, la sección gira al revés */
+      if (!o.haciaB) ss = [ss[0]].concat(ss.slice(1).reverse());
+      secs.push(ss);
+      org.push(base);
+    }
+    /* todas las secciones tienen que girar en el mismo sentido respecto
+       de su tramo; si no, el tubo sale retorcido */
+    for (i = 0; i < secs.length; i++)
+      if (G3.dot(G3.polyNormal(secs[i]), dirs[i]) < 0) return null;
+
+    function ingleta(pts, V, t, m) {
+      var den = G3.dot(t, m);
+      if (!(Math.abs(den) > 0.2)) return null;
+      var out2 = [];
+      for (var q = 0; q < pts.length; q++) {
+        var p = pts[q];
+        var s2 = G3.dot(G3.sub(V, p), m) / den;
+        out2.push(G3.add(p, G3.mul(t, s2)));
+      }
+      return out2;
+    }
+
+    var anillos = [], m2;
+    var nT = orden.length;
+    if (cerrada) {
+      for (i = 0; i < nT; i++) {
+        var tPrev = dirs[(i + nT - 1) % nT], tAct = dirs[i];
+        m2 = G3.norm(G3.add(tPrev, tAct));
+        if (G3.len2(m2) < 1e-12) return null;
+        var an = ingleta(secs[i], org[i], tAct, m2);
+        if (!an) return null;
+        anillos.push(an);
+      }
+      anillos.push(anillos[0]);
+    } else {
+      for (i = 0; i <= nT; i++) {
+        if (i === 0) {
+          anillos.push(secs[0].map(function (p) { return G3.sub(p, G3.mul(dirs[0], orden[0].it.ov)); }));
+        } else if (i === nT) {
+          var last = orden[nT - 1].it;
+          anillos.push(secs[nT - 1].map(function (p) {
+            return G3.add(p, G3.mul(dirs[nT - 1], last.L + last.ov));
+          }));
+        } else {
+          m2 = G3.norm(G3.add(dirs[i - 1], dirs[i]));
+          if (G3.len2(m2) < 1e-12) return null;
+          var an2 = ingleta(secs[i], org[i], dirs[i], m2);
+          if (!an2) return null;
+          anillos.push(an2);
+        }
+      }
+    }
+
+    /* malla del tubo */
+    var verts = [], faces = [];
+    for (i = 0; i < anillos.length; i++)
+      for (j = 0; j < n0; j++) verts.push(anillos[i][j]);
+    var aros = anillos.length;
+    for (i = 0; i + 1 < aros; i++)
+      for (j = 0; j < n0; j++) {
+        var j2 = (j + 1) % n0;
+        var A = i * n0 + j, B = i * n0 + j2, C = (i + 1) * n0 + j2, D = (i + 1) * n0 + j;
+        faces.push([A, B, C, D]);
+      }
+    if (!cerrada) {
+      var tapa1 = [], tapa2 = [];
+      for (j = 0; j < n0; j++) tapa1.push(j);
+      for (j = n0 - 1; j >= 0; j--) tapa2.push((aros - 1) * n0 + j);
+      faces.push(tapa1.reverse());
+      faces.push(tapa2.reverse());
+    }
+    var tubo = new M.Mesh(verts, faces);
+    tubo.weld(1e-9);
+    tubo.clean(true);
+    if (!tubo.faces.length) return null;
+    if (tubo.volume() < 0) tubo.flip();
+    var chk = M.check(tubo);
+    if (!chk.estanco || !chk.manifold) return null;
+    if (!(Math.abs(tubo.volume()) > 1e-12)) return null;
+    return tubo;
   }
 
   /* Agrupa los recortes en cadenas de aristas conectadas: el borde de un
@@ -1118,30 +1266,39 @@
      arista a arista.  Tratarlas sueltas hacía que los recortes vecinos se
      solaparan, que muchos se rechazaran y que el borde saliera desigual. */
   function agrupaCadenas(cutters) {
-    var padre = {};
-    function raiz(x) { while (padre[x] !== undefined && padre[x] !== x) x = padre[x]; return x; }
-    function une(x, y) { var rx = raiz(x), ry = raiz(y); if (rx !== ry) padre[rx] = ry; }
+    /* La conexión se mira por separado en las que quitan y en las que
+       añaden: si se mezclan, los rincones de un hueco cuadrado enlazan
+       el borde de arriba con el de abajo y lo que era una línea deja de
+       serlo, con lo que la herramienta ya no se puede hacer de una pieza. */
+    var padre = { R: {}, S: {} };
+    function raiz(cl, x) { var m = padre[cl]; while (m[x] !== undefined && m[x] !== x) x = m[x]; return x; }
+    function une(cl, x, y) { var rx = raiz(cl, x), ry = raiz(cl, y); if (rx !== ry) padre[cl][rx] = ry; }
     cutters.forEach(function (c) {
-      if (padre[c.a] === undefined) padre[c.a] = c.a;
-      if (padre[c.b] === undefined) padre[c.b] = c.b;
-      une(c.a, c.b);
+      var cl = c.suma ? 'S' : 'R';
+      if (padre[cl][c.a] === undefined) padre[cl][c.a] = c.a;
+      if (padre[cl][c.b] === undefined) padre[cl][c.b] = c.b;
+      une(cl, c.a, c.b);
     });
     var grupos = {};
     cutters.forEach(function (c) {
       /* las que quitan y las que añaden nunca van en la misma herramienta */
-      var k = (c.suma ? 'S' : 'R') + raiz(c.a);
+      var cl = c.suma ? 'S' : 'R';
+      var k = cl + raiz(cl, c.a);
       if (!grupos[k]) grupos[k] = { suma: !!c.suma, lista: [] };
-      grupos[k].lista.push(c.mesh);
+      grupos[k].lista.push(c);
     });
     var out = [];
     Object.keys(grupos).forEach(function (k) {
       var g = grupos[k].lista, suma = grupos[k].suma;
-      if (g.length === 1) { out.push({ mesh: g[0], suma: suma }); return; }
-      /* se unen los recortes de la cadena en una sola herramienta */
-      var u = g[0];
+      if (g.length === 1) { out.push({ mesh: g[0].mesh, suma: suma }); return; }
+      /* de una pieza si la cadena es una sola línea; si no, uniendo */
+      var tubo = null;
+      try { tubo = tuboCadena(g); } catch (e) { tubo = null; }
+      if (tubo) { out.push({ mesh: tubo, suma: suma }); return; }
+      var u = g[0].mesh;
       for (var i = 1; i < g.length; i++) {
-        try { var n2 = CSG.union(u, g[i]); if (n2 && n2.faces.length) u = n2; }
-        catch (e) { out.push({ mesh: g[i], suma: suma }); }
+        try { var n2 = CSG.union(u, g[i].mesh); if (n2 && n2.faces.length) u = n2; }
+        catch (e) { out.push({ mesh: g[i].mesh, suma: suma }); }
       }
       out.push({ mesh: u, suma: suma });
     });
