@@ -291,14 +291,19 @@
   }
 
   /* Aristas únicas -> [[i,j], ...] con las caras adyacentes */
+  /* La clave de arista empaqueta los dos índices en un entero.  Con
+     cadenas de texto costaba el doble, y esto se llama en cada
+     comprobación de malla, que es en cada paso de cada booleana. */
+  function claveArista(a, b, n) { return a < b ? a * n + b : b * n + a; }
+
   Mesh.prototype.edges = function () {
-    var map = new Map(), i, j;
+    var map = new Map(), n = this.verts.length, i, j;
     for (i = 0; i < this.faces.length; i++) {
       var f = this.faces[i];
       for (j = 0; j < f.length; j++) {
         var a = f[j], b = f[(j + 1) % f.length];
         if (a === b) continue;
-        var k = a < b ? a + ',' + b : b + ',' + a;
+        var k = claveArista(a, b, n);
         var e = map.get(k);
         if (e) e.f.push(i); else map.set(k, { a: Math.min(a, b), b: Math.max(a, b), f: [i] });
       }
@@ -354,12 +359,20 @@
   /* Soldado de vértices coincidentes */
   Mesh.prototype.weld = function (tol) {
     tol = tol || 1e-7;
+    /* Rejilla de soldadura en tres tablas anidadas.  Antes la celda se
+       nombraba con una cadena «x|y|z»: construir ese texto para cada
+       vértice de cada malla intermedia de cada booleana salía carísimo.
+       Tres búsquedas con clave entera cuestan bastante menos que una
+       con clave de texto que hay que fabricar primero. */
     var inv = 1 / tol, map = new Map(), nv = [], remap = new Array(this.verts.length), i;
     for (i = 0; i < this.verts.length; i++) {
       var p = this.verts[i];
-      var k = Math.round(p.x * inv) + '|' + Math.round(p.y * inv) + '|' + Math.round(p.z * inv);
-      var e = map.get(k);
-      if (e === undefined) { e = nv.length; map.set(k, e); nv.push(p); }
+      var mx = map.get(Math.round(p.x * inv));
+      if (mx === undefined) { mx = new Map(); map.set(Math.round(p.x * inv), mx); }
+      var my = mx.get(Math.round(p.y * inv));
+      if (my === undefined) { my = new Map(); mx.set(Math.round(p.y * inv), my); }
+      var e = my.get(Math.round(p.z * inv));
+      if (e === undefined) { e = nv.length; my.set(Math.round(p.z * inv), e); nv.push(p); }
       remap[i] = e;
     }
     var nf = [];
@@ -428,7 +441,7 @@
      Se parte el polígono en los dos bucles que realmente lo forman.
      ------------------------------------------------------------ */
   Mesh.prototype.unpinch = function () {
-    var out = [], split = 0, i;
+    var out = [], split = 0, i, nv0 = this.verts.length;
     for (i = 0; i < this.faces.length; i++) {
       var stack = [this.faces[i]], guard = 0;
       while (stack.length && guard++ < 200) {
@@ -438,7 +451,7 @@
         for (j = 0; j < f.length; j++) {
           var a = f[j], b = f[(j + 1) % f.length];
           if (a === b) continue;
-          var k = a < b ? a + ',' + b : b + ',' + a;
+          var k = claveArista(a, b, nv0);
           if (seen.has(k)) { cut = { i: seen.get(k), j: j }; break; }
           seen.set(k, j);
         }
@@ -1455,13 +1468,25 @@
        manifold : además ninguna arista con más de dos caras.  Una malla
                   estanca pero no manifold sigue siendo utilizable; sólo
                   significa que en alguna arista concurren tres caras. */
+  /* Sólo hacen falta los recuentos, así que no se monta la lista de
+     aristas —un objeto con su array por arista— sino un simple contador
+     de usos.  En una malla de seis mil caras eso son nueve mil objetos
+     menos por llamada, y esto se llama en cada paso de cada booleana. */
   M.check = function (mesh) {
-    var ed = mesh.edges(), open = 0, nonMan = 0;
-    for (var i = 0; i < ed.length; i++) {
-      if (ed[i].f.length === 1) open++;
-      else if (ed[i].f.length > 2) nonMan++;
+    var F = mesh.faces, n = mesh.verts.length, uso = new Map(), i, j;
+    for (i = 0; i < F.length; i++) {
+      var f = F[i];
+      for (j = 0; j < f.length; j++) {
+        var a = f[j], b = f[(j + 1) % f.length];
+        if (a === b) continue;
+        var k = claveArista(a, b, n);
+        var c = uso.get(k);
+        uso.set(k, c === undefined ? 1 : c + 1);
+      }
     }
-    return { aristas: ed.length, abiertas: open, noManifold: nonMan,
+    var open = 0, nonMan = 0;
+    uso.forEach(function (c) { if (c === 1) open++; else if (c > 2) nonMan++; });
+    return { aristas: uso.size, abiertas: open, noManifold: nonMan,
              estanco: open === 0,
              manifold: open === 0 && nonMan === 0,
              caras: mesh.faces.length, vertices: mesh.verts.length };

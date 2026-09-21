@@ -36,6 +36,7 @@
       var r = await fetch(B.url + '/api/health', { cache: 'no-store' });
       if (!r.ok) return null;
       B.status = await r.json();
+      if (B.anuncia) B.anuncia(B.status);
       return B.status;
     } catch (e) { return null; }
   };
@@ -147,21 +148,32 @@
     await ctx.app.saveAsDwg(v ? v.keyword : '2018');
   });
 
-  /* Aviso en el arranque */
+  /* Aviso en el arranque.
+
+     Sólo se pregunta por el puente cuando alguien lo ha configurado a
+     mano.  Si la dirección se dedujo del propio origen —el caso de un
+     sitio estático corriente— no se pregunta nada al arrancar: no había
+     puente que encontrar y la consulta dejaba un 404 en la consola del
+     navegador en cada carga, que es justo lo que hace pensar que algo va
+     mal cuando no va mal nada.  Si el sitio sí lleva puente detrás, se
+     descubre igual la primera vez que se abre o se guarda un .dwg, y el
+     aviso sale entonces, que es cuando importa. */
+  B.avisado = false;
+  B.anuncia = function (st) {
+    var app = window.CADAPP;
+    if (!app || B.avisado) return;
+    if (!st || !(st.canRead || st.canWrite)) return;
+    B.avisado = true;
+    app.out('Puente DWG activo: ABRE acepta .dwg y GUARDARDWG lo escribe.', 'ok');
+  };
+
   window.addEventListener('load', function () {
     setTimeout(function () {
       var app = window.CADAPP;
-      if (!app) return;
+      if (!app || !B.url || B.propio) return;
       B.check().then(function (st) {
-        if (st && (st.canRead || st.canWrite)) {
-          app.out('Puente DWG activo: ABRE acepta .dwg y GUARDARDWG lo escribe.', 'ok');
-        } else if (B.url && !B.propio) {
-          /* Sólo se avisa si alguien configuró un puente a mano.  Cuando
-             la dirección se dedujo del propio origen —el caso de un sitio
-             estático corriente— no hay nada que avisar: el aviso salía en
-             cada arranque y hacía pensar que algo iba mal. */
-          app.out('El puente DWG de ' + B.url + ' no responde: ABRE y GUARDAR siguen funcionando con DXF.', 'warn');
-        }
+        if (st && (st.canRead || st.canWrite)) B.anuncia(st);
+        else app.out('El puente DWG de ' + B.url + ' no responde: ABRE y GUARDAR siguen funcionando con DXF.', 'warn');
       });
     }, 600);
   });

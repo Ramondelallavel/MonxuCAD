@@ -619,7 +619,7 @@
       }
       case 'keyword': {
         if (!t && p.opts.def !== undefined) { this.resolve({ kw: kwShort(p.opts.def), keyword: p.opts.def }); return; }
-        this.out('Opción no válida.', 'err'); this.setPrompt(p.text);
+        this.out('Opción no válida.' + this.pistaComando(t), 'err'); this.setPrompt(p.text);
         return;
       }
       case 'select': {
@@ -627,10 +627,22 @@
         return;
       }
       case 'entity': {
-        this.out('Se requiere designar un objeto.', 'err'); this.setPrompt(p.text);
+        this.out('Se requiere designar un objeto.' + this.pistaComando(t), 'err'); this.setPrompt(p.text);
         return;
       }
     }
+  };
+
+  /* Si en medio de un comando se teclea el nombre de otro, no se ejecuta:
+     hay que escribirlo con apóstrofo, y sólo vale si es transparente.  El
+     escueto «Opción no válida» dejaba a cualquiera preguntándose por qué
+     la órbita no le hacía caso al escribir PLANTA2D. */
+  Engine.pistaComando = function (t) {
+    var d = null;
+    try { d = Cmd.find(t); } catch (e) { d = null; }
+    if (!d) return '';
+    if (d.transparent) return '  Para ' + d.name + ' sin salir de aquí, escríbalo con apóstrofo: \'' + d.name;
+    return '  ' + d.name + ' no puede ejecutarse dentro de otro comando: pulse Esc primero.';
   };
 
   Engine.resolve = function (val) {

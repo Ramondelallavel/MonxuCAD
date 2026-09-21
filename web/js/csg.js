@@ -227,11 +227,17 @@
 
   CSG.toMesh = function (polys) {
     var mesh = new M.Mesh([], []);
+    /* rejilla en tres tablas anidadas con clave entera: nombrar la celda
+       con una cadena «x|y|z» costaba más que el recorte en sí */
     var map = new Map(), inv = 1e7;
     function vid(p) {
-      var k = Math.round(p.x * inv) + '|' + Math.round(p.y * inv) + '|' + Math.round(p.z * inv);
-      var e = map.get(k);
-      if (e === undefined) { e = mesh.verts.length; map.set(k, e); mesh.verts.push(G3.copy(p)); }
+      var rx = Math.round(p.x * inv), ry = Math.round(p.y * inv), rz = Math.round(p.z * inv);
+      var mx = map.get(rx);
+      if (mx === undefined) { mx = new Map(); map.set(rx, mx); }
+      var my = mx.get(ry);
+      if (my === undefined) { my = new Map(); mx.set(ry, my); }
+      var e = my.get(rz);
+      if (e === undefined) { e = mesh.verts.length; my.set(rz, e); mesh.verts.push(G3.copy(p)); }
       return e;
     }
     for (var i = 0; i < polys.length; i++) {
