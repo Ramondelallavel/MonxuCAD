@@ -351,6 +351,21 @@
         continue;
       }
       if (!BATCHABLE[t]) { (complex || (complex = [])).push(ent); continue; }
+      /* Una polilínea con grosor se RELLENA, y el lote sólo sabe trazar
+         líneas finas: aquí se quedaban planas.  Con FILLMODE a cero se
+         dibujan como líneas, que es lo que pide la variable, y entonces
+         sí entran en el lote.
+
+         Mientras se encuadra o se hace zoom en un dibujo pesado se
+         quedan también en el lote, trazadas finas: rellenar veinte mil
+         de una en una cuesta tres veces más, y la lista de objetos
+         complicados está recortada, así que si no se haría desaparecer
+         la mayoría en cuanto se mueve el ratón.  Al detenerse se repinta
+         entero y salen con su grosor. */
+      if (t === 'LWPOLYLINE' && doc.vars.FILLMODE && !this.fastMode &&
+          (ent.width > 0 || E.plineTieneTalle(ent))) {
+        (complex || (complex = [])).push(ent); continue;
+      }
       var b = E.bboxOf(ent, doc);
       if (b.x1 <= b.x2) {
         if (b.x2 < wbox.x1 || b.x1 > wbox.x2 || b.y2 < wbox.y1 || b.y1 > wbox.y2) { self.stats.omitidos++; continue; }
@@ -726,7 +741,9 @@
       case 'LWPOLYLINE': {
         var dsp = E.dispOf(ent, doc, this.quality());
         var pts = dsp[0] ? dsp[0].pts : [];
-        if (ent.width > 0 && doc.vars.FILLMODE) {
+        if (doc.vars.FILLMODE && E.plineTieneTalle(ent)) {
+          this.drawTaperPline(ctx, ent, pts, doc, col);
+        } else if (ent.width > 0 && doc.vars.FILLMODE) {
           this.drawWidePline(ctx, pts, ent.closed, ent.width * this.view.zoom, col);
         } else { this.pathPts(ctx, pts, ent.closed); ctx.stroke(); }
         break;
@@ -785,6 +802,50 @@
     ctx.strokeStyle = col;
     this.pathPts(ctx, pts, closed);
     ctx.stroke();
+    ctx.restore();
+  };
+
+  /* Polilínea que se estrecha.
+
+     El ancho de cada vértice se guardaba, se transformaba y se escribía
+     al DXF, pero no se dibujaba: una flecha o una marca que va de
+     gruesa a fina se veía como una raya.  Aquí se levanta la silueta
+     corriendo cada punto media anchura por su normal —la media de los
+     dos tramos que llegan a él, que es lo que hace la esquina limpia— y
+     se rellena de una pieza. */
+  Renderer.prototype.drawTaperPline = function (ctx, ent, pts, doc, col) {
+    if (pts.length < 2) return;
+    var anchos = E.plineAnchos(ent, this.quality());
+    var z = this.view.zoom, self = this;
+    function lado(sgn) {
+      var out = [], n = pts.length;
+      for (var i = 0; i < n; i++) {
+        var a = pts[i === 0 ? (ent.closed ? n - 1 : 0) : i - 1];
+        var b = pts[i === n - 1 ? (ent.closed ? 0 : n - 1) : i + 1];
+        var tx = b.x - a.x, ty = b.y - a.y;
+        var l = Math.hypot(tx, ty);
+        if (l < 1e-12) { tx = 1; ty = 0; l = 1; }
+        var w = (anchos[i] === undefined ? (ent.width || 0) : anchos[i]) / 2 * sgn;
+        out.push(self.w2s({ x: pts[i].x - ty / l * w, y: pts[i].y + tx / l * w }));
+      }
+      return out;
+    }
+    var izq = lado(1), der = lado(-1);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(izq[0].x, izq[0].y);
+    for (var i = 1; i < izq.length; i++) ctx.lineTo(izq[i].x, izq[i].y);
+    if (ent.closed) {
+      ctx.lineTo(izq[0].x, izq[0].y);
+      ctx.moveTo(der[0].x, der[0].y);
+      for (i = der.length - 1; i >= 0; i--) ctx.lineTo(der[i].x, der[i].y);
+    } else {
+      for (i = der.length - 1; i >= 0; i--) ctx.lineTo(der[i].x, der[i].y);
+    }
+    ctx.closePath();
+    ctx.fill(ent.closed ? 'evenodd' : 'nonzero');
     ctx.restore();
   };
 

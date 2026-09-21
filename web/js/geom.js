@@ -208,6 +208,14 @@
     n = n || 96;
     var s = t1 - t0;
     if (Math.abs(s) < 1e-9) s = TAU;
+    /* El arco de elipse va SIEMPRE del parámetro inicial al final en
+       sentido antihorario, como manda el DXF.  Si el final es menor que
+       el inicio —un arco que cruza el cero, como el cuadrante de la
+       derecha— hay que dar la vuelta: restando sin más salía el arco
+       complementario.  El dibujo en pantalla sí lo hacía bien, así que
+       lo que se veía y lo que se podía designar, medir o exportar eran
+       dos arcos distintos. */
+    else if (s < 0) s += TAU;
     var out = [];
     for (var i = 0; i <= n; i++) out.push(G.ellPt(c, majx, majy, ratio, t0 + (s * i) / n));
     return out;

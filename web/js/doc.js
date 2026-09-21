@@ -758,6 +758,46 @@
     return (ent.fit && ent.fit.length) ? ent.fit : (ent.ctrl || []);
   };
 
+  /* Ancho en cada punto de la polilínea de visualización, en el mismo
+     orden que E.plinePts.  En DXF, el ancho inicial de un vértice es el
+     del tramo que sale de él y el final, el del tramo que llega al
+     siguiente, así que a lo largo de un tramo se interpola. */
+  E.plineAnchos = function (ent, q) {
+    var out = [], v = ent.verts, n = v.length;
+    if (!n) return out;
+    var base = ent.width || 0;
+    var last = ent.closed ? n : n - 1;
+    function anchoEn(i, t) {
+      var a = v[i];
+      var sw = a.sw || base, ew = a.ew || base;
+      return sw + (ew - sw) * t;
+    }
+    for (var i = 0; i < last; i++) {
+      var a = v[i], b = v[(i + 1) % n];
+      out.push(anchoEn(i, 0));
+      if (a.b) {
+        var arc = G.bulgeArc(a, b, a.b);
+        if (arc) {
+          var seg = Math.max(4, Math.ceil((Math.abs(arc.inc) / G.TAU) * CURVE_SEGS * (q || 1)));
+          for (var k = 1; k < seg; k++) out.push(anchoEn(i, k / seg));
+        }
+      }
+    }
+    if (!ent.closed && last > 0) out.push(anchoEn(last - 1, 1));
+    return out;
+  };
+
+  /* ¿Lleva la polilínea algún tramo que se estrecha? */
+  E.plineTieneTalle = function (ent) {
+    if (!ent.verts) return false;
+    for (var i = 0; i < ent.verts.length; i++) {
+      var v = ent.verts[i];
+      if ((v.sw || 0) !== (v.ew || 0)) return true;
+      if ((v.sw || 0) > 0) return true;
+    }
+    return false;
+  };
+
   /* Spline por Catmull-Rom sobre puntos de ajuste, o B-spline de verdad
      si la entidad trae puntos de control con su vector de nudos */
   E.splinePts = function (ent, pasos) {

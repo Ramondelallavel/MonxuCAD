@@ -1342,13 +1342,18 @@
           { x: get(codes, 11, 1), y: get(codes, 21, 0) }, get(codes, 40, 1),
           get(codes, 41, 0), get(codes, 42, G.TAU), o);
       case 'LWPOLYLINE': {
-        var xs = [], ys = [], bs = [];
+        /* los anchos de cada vértice (40 inicial, 41 final) se perdían:
+           una polilínea que va de gruesa a fina —una flecha, una pista,
+           una marca vial— llegaba como una raya de grosor cero */
+        var verts = [], cur = null;
         codes.forEach(function (c) {
-          if (c[0] === 10) { xs.push(c[1]); bs.push(0); }
-          else if (c[0] === 20) ys.push(c[1]);
-          else if (c[0] === 42) bs[xs.length - 1] = c[1];
+          if (c[0] === 10) { cur = { x: c[1], y: 0, b: 0, sw: 0, ew: 0 }; verts.push(cur); return; }
+          if (!cur) return;
+          if (c[0] === 20) cur.y = c[1];
+          else if (c[0] === 42) cur.b = c[1];
+          else if (c[0] === 40) cur.sw = c[1];
+          else if (c[0] === 41) cur.ew = c[1];
         });
-        var verts = xs.map(function (x, k) { return { x: x, y: ys[k] || 0, b: bs[k] || 0 }; });
         if (verts.length < 2) return null;
         var pl = E.pline(verts, !!(get(codes, 70, 0) & 1), o);
         pl.width = get(codes, 43, 0);
@@ -1368,7 +1373,8 @@
               while (m < to && pairs[m][0] !== 0) { vc.push(pairs[m]); m++; }
               var vf = get(vc, 70, 0);
               if (!(vf & 16) && !(vf & 8) || true) {
-                vs.push({ x: get(vc, 10, 0), y: get(vc, 20, 0), b: get(vc, 42, 0) });
+                vs.push({ x: get(vc, 10, 0), y: get(vc, 20, 0), b: get(vc, 42, 0),
+                          sw: get(vc, 40, 0), ew: get(vc, 41, 0) });
               }
               k = m; continue;
             }
