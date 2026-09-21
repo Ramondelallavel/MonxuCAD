@@ -301,7 +301,7 @@
   CSG.post = function (mesh, noMerge) {
     mesh.clean();
     mesh.unpinch();
-    if (noMerge) { mesh.fixTJunctions(1e-6); mesh.unpinch(); return mesh; }
+    if (noMerge) { mesh.fixTJunctions(1e-6); mesh.unpinch(); return CSG.sanea(mesh); }
     /* Se guarda la malla sin fusionar: si la fusión deja aristas
        compartidas por más de dos caras (no-manifold), se descarta y se
        devuelve la versión sin fusionar, que siempre sale bien formada.
@@ -323,6 +323,51 @@
       mesh.verts = plain.verts;
       mesh.faces = plain.faces;
     }
+    return CSG.sanea(mesh);
+  };
+
+  /* ------------------------------------------------------------
+     Saneado de la malla resultante
+     El recorte BSP deja de vez en cuando vértices casi coincidentes —del
+     orden de una diezmilésima del tamaño de la pieza— que la soldadura
+     con tolerancia fija no junta: quedan grietas de una o dos aristas.
+     En una pieza suelta no se nota, pero encadenando booleanos se
+     acumula y el sólido deja de ser estanco, que es lo que impide
+     exportarlo a fabricación.
+
+     Aquí se intenta cerrar con una tolerancia proporcional al tamaño de
+     la pieza, probando de menor a mayor, y se acepta el resultado sólo si
+     mejora la topología SIN cambiar el volumen: así nunca se traga un
+     detalle de verdad.  Una malla que ya está cerrada no se toca.
+     ------------------------------------------------------------ */
+  CSG.sanea = function (mesh) {
+    if (!mesh || !mesh.faces.length) return mesh;
+    var c = M.check(mesh);
+    if (c.estanco && c.manifold) return mesh;
+    var b = mesh.bbox();
+    var diag = Math.hypot(b.x2 - b.x1, b.y2 - b.y1, b.z2 - b.z1) || 1;
+    var vol0 = Math.abs(mesh.volume());
+    var mejor = null, mejorC = c;
+    var escalas = [1e-7, 1e-6, 1e-5];
+    for (var i = 0; i < escalas.length; i++) {
+      var tol = Math.max(1e-12, diag * escalas[i]);
+      var m2 = mesh.clone();
+      m2.weld(tol);
+      m2.clean();
+      m2.unpinch();
+      m2.fixTJunctions(tol);
+      m2.unpinch();
+      if (!m2.faces.length) continue;
+      /* el volumen no puede moverse: si se mueve, se ha comido geometría */
+      var vol2 = Math.abs(m2.volume());
+      if (vol0 > 1e-12 && Math.abs(vol2 - vol0) > vol0 * 1e-6) continue;
+      var c2 = M.check(m2);
+      var mejora = c2.abiertas < mejorC.abiertas ||
+                   (c2.abiertas === mejorC.abiertas && c2.noManifold < mejorC.noManifold);
+      if (mejora) { mejor = m2; mejorC = c2; }
+      if (c2.estanco && c2.manifold) break;
+    }
+    if (mejor) { mesh.verts = mejor.verts; mesh.faces = mejor.faces; }
     return mesh;
   };
 

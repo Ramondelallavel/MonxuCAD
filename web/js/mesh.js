@@ -780,6 +780,56 @@
      Operaciones de barrido
      ============================================================ */
 
+  /* ------------------------------------------------------------
+     ¿El contorno se cruza a sí mismo?
+     Un perfil en ocho no define un sólido: extruirlo daba una malla
+     abierta, de volumen cero y sin avisar de nada.  Más vale decir que el
+     croquis está mal, como hace cualquier programa de modelado.
+     Se comprueba sobre el plano del propio contorno; los extremos
+     compartidos de segmentos contiguos no cuentan como cruce.
+     ------------------------------------------------------------ */
+  function seCruza(prof) {
+    var n = prof.length;
+    if (n < 4 || n > 3000) return false;        /* muy corto o muy fino: no compensa */
+    /* Se proyecta tirando el eje de menor recorrido.  No vale apoyarse en
+       la normal del contorno: la de un perfil en ocho es justo cero, que
+       es precisamente el caso que hay que cazar. */
+    var mn = { x: Infinity, y: Infinity, z: Infinity }, mx = { x: -Infinity, y: -Infinity, z: -Infinity };
+    for (var i0 = 0; i0 < n; i0++) {
+      var pt0 = prof[i0];
+      var z0 = pt0.z || 0;
+      if (pt0.x < mn.x) mn.x = pt0.x; if (pt0.x > mx.x) mx.x = pt0.x;
+      if (pt0.y < mn.y) mn.y = pt0.y; if (pt0.y > mx.y) mx.y = pt0.y;
+      if (z0 < mn.z) mn.z = z0; if (z0 > mx.z) mx.z = z0;
+    }
+    var ex = mx.x - mn.x, ey = mx.y - mn.y, ez = mx.z - mn.z;
+    var fuera = (ez <= ex && ez <= ey) ? 'z' : ((ey <= ex) ? 'y' : 'x');
+    var q = [];
+    for (var i = 0; i < n; i++) {
+      var pp = prof[i], pz = pp.z || 0;
+      if (fuera === 'z') q.push({ x: pp.x, y: pp.y });
+      else if (fuera === 'y') q.push({ x: pp.x, y: pz });
+      else q.push({ x: pp.y, y: pz });
+    }
+    function lado(a, b, c) { return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x); }
+    function cruzan(a, b, c, d) {
+      var d1 = lado(c, d, a), d2 = lado(c, d, b), d3 = lado(a, b, c), d4 = lado(a, b, d);
+      /* sólo cruce propio: si alguno es cero es que se tocan, y tocarse vale */
+      return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) &&
+             Math.abs(d1) > 1e-12 && Math.abs(d2) > 1e-12 &&
+             Math.abs(d3) > 1e-12 && Math.abs(d4) > 1e-12;
+    }
+    for (var i2 = 0; i2 < n; i2++) {
+      var a1 = q[i2], b1 = q[(i2 + 1) % n];
+      for (var j = i2 + 2; j < n; j++) {
+        if (i2 === 0 && j === n - 1) continue;   /* contiguos por el cierre */
+        if (cruzan(a1, b1, q[j], q[(j + 1) % n])) return true;
+      }
+    }
+    return false;
+  }
+  M.seCruza = seCruza;
+
   /* Extrusión recta de un perfil cerrado.
      prof  : [{x,y,z}] cerrado (sin repetir el primero)
      dir   : vector de extrusión
@@ -788,6 +838,8 @@
   M.extrude = function (prof, dir, taper, holes) {
     if (!prof || prof.length < 3) return null;
     if (G3.len2(dir) < 1e-18) return null;      /* altura nula: no hay sólido */
+    if (seCruza(prof)) return null;             /* el croquis se cruza a sí mismo */
+    for (var ih = 0; holes && ih < holes.length; ih++) if (seCruza(holes[ih])) return null;
     var n = G3.polyNormal(prof);
     if (G3.dot(n, dir) < 0) { prof = prof.slice().reverse(); n = G3.neg(n); }
     var H = G3.len(dir);

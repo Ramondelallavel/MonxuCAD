@@ -389,9 +389,12 @@
     }
     if (!pathEnt && !dir && !num(h)) return;
     ctx.doc.mark('EXTRUSION');
-    var made = 0, del = ctx.doc.vars.DELOBJ === undefined ? 1 : ctx.doc.vars.DELOBJ;
+    var made = 0, cruzados = 0, del = ctx.doc.vars.DELOBJ === undefined ? 1 : ctx.doc.vars.DELOBJ;
     for (i = 0; i < profs.length; i++) {
       var mesh = null;
+      /* un croquis que se cruza a sí mismo no define un sólido: más vale
+         decirlo que devolver un "no se ha podido" sin explicación */
+      if (M.seCruza && M.seCruza(profs[i].pts)) { cruzados++; continue; }
       if (pathEnt) {
         var pp = S.profileOf(pathEnt, ctx.doc, 'high');
         if (pp) mesh = M.sweep(profs[i].pts, pp, { closedPath: !!pp.closed });
@@ -413,8 +416,14 @@
       made++;
       if (del) ctx.doc.remove(profs[i].ent);
     }
-    if (!made) { ctx.doc.discardTx(); ctx.err('No se ha podido extruir.'); return; }
-    ctx.out(made + ' sólido(s) creado(s) por extrusión.');
+    if (!made) {
+      ctx.doc.discardTx();
+      ctx.err(cruzados ? 'El contorno se cruza a sí mismo: no define un sólido.'
+                       : 'No se ha podido extruir.');
+      return;
+    }
+    ctx.out(made + ' sólido(s) creado(s) por extrusión.' +
+            (cruzados ? '  ' + cruzados + ' contorno(s) descartado(s) por cruzarse a sí mismos.' : ''));
   });
 
   Cmd.add(['REVOLUCION', 'REVOLVE', 'REV'], { group: '3d', icon: 'revolve', title: 'Revolución' },
