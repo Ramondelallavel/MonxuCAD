@@ -4,7 +4,7 @@
 
 | Dónde | Archivo |
 |---|---|
-| **Android** | [MonxuCAD.apk](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD.apk) |
+| **Android** | [MonxuCAD.apk](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD.apk) · [comprimido](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-apk.zip) |
 | **Windows** | [instalador](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.exe) · [portable](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows-portable.exe) |
 | **macOS** | [Apple Silicon](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-arm64.dmg) · [Intel](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-x64.dmg) |
 | **Linux** | [AppImage](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.AppImage) · [.deb](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.deb) |
@@ -23,6 +23,11 @@ falta cuenta ni descomprimir nada, y se abren igual desde el móvil.
 ## Android
 
 **Requisitos:** Android 7.0 o posterior.
+
+Si el navegador se niega a bajar el `.apk` suelto —algunos lo
+bloquean sin dar opción, y algunos gestores de correo tampoco lo
+dejan pasar—, baje el **comprimido**, descomprímalo y abra el `.apk`
+que hay dentro. Es el mismo archivo.
 
 1. Abra el enlace del `.apk` **desde el propio teléfono**.
 2. El navegador avisa de que ese tipo de archivo puede ser dañino:

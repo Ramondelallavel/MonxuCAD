@@ -21,7 +21,7 @@ su sistema; son descargas directas, sin cuenta y sin descomprimir.
 
 | Dónde | Archivo |
 |---|---|
-| Android | `MonxuCAD.apk` |
+| Android | `MonxuCAD.apk`, o `MonxuCAD-apk.zip` si el navegador se niega a bajar el suelto |
 | Windows | `MonxuCAD-windows.exe` (instalador) o `MonxuCAD-windows-portable.exe` |
 | macOS | `MonxuCAD-mac-arm64.dmg` (Apple Silicon) o `MonxuCAD-mac-x64.dmg` (Intel) |
 | Linux | `MonxuCAD-linux.AppImage` o `MonxuCAD-linux.deb` |

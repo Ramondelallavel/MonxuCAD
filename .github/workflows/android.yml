@@ -223,7 +223,13 @@ jobs:
       - name: Publicar
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash .github/publicar.sh salida/MonxuCAD.apk
+        run: |
+          # El .apk suelto no le sirve a todo el mundo: hay navegadores
+          # de móvil y gestores de correo que se niegan a manejarlo.
+          # Comprimido pasa por donde el suelto no, así que se publican
+          # los dos y cada cual coge el que le funcione.
+          (cd salida && zip -q -9 MonxuCAD-apk.zip MonxuCAD.apk)
+          bash .github/publicar.sh salida/MonxuCAD.apk salida/MonxuCAD-apk.zip
 
       - name: Dónde queda
         run: |
