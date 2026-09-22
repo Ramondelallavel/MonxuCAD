@@ -168,6 +168,19 @@ y `GUARDARDWG` lo escribe.
 Sin el puente, el DXF que genera MonxuCAD lo abre AutoCAD de forma nativa y
 `GUARDARCOMO` produce el `.dwg` equivalente.
 
+## No se pierde el trabajo
+
+El dibujo se guarda solo en el propio equipo cada pocos segundos y, en
+cuanto la aplicación pasa a segundo plano, al instante —que en un
+teléfono es el último momento seguro, porque Android mata sin avisar lo
+que no está en pantalla—. Si algo se corta, al volver a abrirla ofrece
+recuperar lo que quedó a medias, diciendo cuántos objetos eran y de
+cuándo. La copia se borra al guardar de verdad.
+
+Cerrar con cambios sin guardar pregunta antes: en el escritorio, con un
+diálogo del sistema que ofrece **Guardar y cerrar**, **Cerrar sin
+guardar** o **Cancelar**.
+
 ## Instalarla en el ordenador o en el teléfono
 
 Descarga directa, sin cuenta y sin descomprimir, desde
@@ -248,6 +261,7 @@ web/                aplicación (sin dependencias, JavaScript puro)
     app3d.js        conmutador 2D/3D, navegación y trayectorias en pantalla
     dwgbridge.js    cliente del puente DWG
     instalar.js     instalación en el equipo y archivos de arranque
+    autoguardado.js copia de seguridad, recuperación y red de errores
   sw.js             copia local para trabajar sin conexión
   manifest.webmanifest
 desktop/            envoltura de escritorio (Electron)

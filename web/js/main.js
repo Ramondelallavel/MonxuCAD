@@ -1286,21 +1286,7 @@
         var doc;
         if (/\.(dcad|json)$/.test(lower)) doc = self.docFromJSON(JSON.parse(txt));
         else doc = CAD.DXF.read(txt);
-        doc.name = name;
-        self.doc = doc;
-        self.selSet = [];
-        self.preview = [];
-        self.pending = null;
-        self.activeVp = null;
-        self.paperMode = false;
-        self.layout = null;
-        self.layoutIndex = -1;
-        self.ui.buildLayoutTabs();
-        document.getElementById('docTitle').textContent = 'MonxuCAD   ' + name;
-        var b = E.extentsAll(doc.entities, doc);
-        if (G.bboxValid(b)) self.r.zoomBox(b);
-        self.ui.syncStatus();
-        self.ui.buildRibbon();
+        self.adoptaDoc(doc, name);
         self.out(doc.entities.length.toLocaleString('es-ES') + ' objeto(s), ' + doc.layerOrder.length +
           ' capa(s), ' + Object.keys(doc.blocks).length + ' bloque(s) en ' +
           ((performance.now() - t0) / 1000).toFixed(2) + ' s.', 'ok');
@@ -1336,6 +1322,26 @@
     this.refresh();
   };
 
+  /* Poner un documento recién leído en pie: lo usa tanto abrir un
+     archivo como recuperar el dibujo que quedó a medias. */
+  App.prototype.adoptaDoc = function (doc, nombre) {
+    doc.name = nombre;
+    this.doc = doc;
+    this.selSet = [];
+    this.preview = [];
+    this.pending = null;
+    this.activeVp = null;
+    this.paperMode = false;
+    this.layout = null;
+    this.layoutIndex = -1;
+    this.ui.buildLayoutTabs();
+    document.getElementById('docTitle').textContent = 'MonxuCAD   ' + nombre;
+    var b = E.extentsAll(doc.entities, doc);
+    if (G.bboxValid(b)) this.r.zoomBox(b);
+    this.ui.syncStatus();
+    this.ui.buildRibbon();
+  };
+
   App.prototype.docToJSON = function () {
     var d = this.doc;
     return JSON.stringify({
@@ -1360,18 +1366,23 @@
     return d;
   };
 
+  /* Contesta si el dibujo ha quedado guardado de verdad.  Antes daba
+     el documento por guardado aunque el usuario cancelara el diálogo,
+     y entonces nada avisaba al cerrar: el trabajo se perdía sin que
+     mediara un solo aviso. */
   App.prototype.saveDrawing = async function (as) {
     var base = (this.doc.name || 'Dibujo1').replace(/\.[^.]+$/, '');
     if (as) {
       var n = await this.ui.promptDialog('Guardar dibujo como', 'Nombre de archivo:', base);
-      if (!n) return;
+      if (!n) return false;
       base = n.replace(/\.[^.]+$/, '');
       this.doc.name = base + '.dxf';
       document.getElementById('docTitle').textContent = 'MonxuCAD   ' + this.doc.name;
     }
     var txt = CAD.DXF.write(this.doc, { version: 'AC1015' });
-    await CAD.Exporter.saveFile(this, base + '.dxf', txt, 'dxf');
-    this.doc.dirty = false;
+    var hecho = await CAD.Exporter.saveFile(this, base + '.dxf', txt, 'dxf');
+    if (hecho) this.doc.dirty = false;
+    return !!hecho;
   };
 
   App.prototype.exportDrawing = function () {

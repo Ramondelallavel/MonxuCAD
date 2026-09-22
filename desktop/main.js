@@ -219,6 +219,48 @@ function montaMenu() {
 }
 
 /* ------------------------------------------------------------
+   Cerrar sin perder nada
+   ------------------------------------------------------------ */
+let permitirCierre = false;
+
+function preguntaAlRendido(js) {
+  if (!ventana || ventana.isDestroyed()) return Promise.resolve(null);
+  return ventana.webContents.executeJavaScript(js, true).catch(function () { return null; });
+}
+
+function cierraDeVerdad() {
+  permitirCierre = true;
+  if (ventana && !ventana.isDestroyed()) ventana.close();
+}
+
+async function decideCierre() {
+  const sucio = await preguntaAlRendido(
+    '!!(window.CADAPP && CADAPP.doc && CADAPP.doc.dirty && CADAPP.doc.entities.length)');
+  if (!sucio) { cierraDeVerdad(); return; }
+
+  const nombre = (await preguntaAlRendido(
+    '(window.CADAPP && CADAPP.doc && CADAPP.doc.name) || "el dibujo"')) || 'el dibujo';
+
+  const res = await dialog.showMessageBox(ventana, {
+    type: 'warning',
+    title: 'MonxuCAD',
+    message: nombre + ' tiene cambios sin guardar.',
+    detail: 'Si cierra sin guardar, se pierden.',
+    buttons: ['Guardar y cerrar', 'Cerrar sin guardar', 'Cancelar'],
+    defaultId: 0,
+    cancelId: 2,
+    noLink: true
+  });
+
+  if (res.response === 2) return;
+  if (res.response === 1) { cierraDeVerdad(); return; }
+
+  /* Guardar abre el diálogo del sistema; si lo cancelan, no se cierra. */
+  const guardado = await preguntaAlRendido('window.CADAPP.saveDrawing(false)');
+  if (guardado) cierraDeVerdad();
+}
+
+/* ------------------------------------------------------------
    Ventana
    ------------------------------------------------------------ */
 function creaVentana() {
@@ -242,6 +284,19 @@ function creaVentana() {
 
   ventana.once('ready-to-show', function () { ventana.show(); });
   ventana.on('closed', function () { ventana = null; rendidoListo = false; });
+
+  /* Cerrar con cambios sin guardar pregunta antes.  El aviso que da
+     el navegador por su cuenta aquí no sirve: en Electron bloquea el
+     cierre sin enseñar nada, y la ventana se queda muerta.  Así que
+     se pregunta con un diálogo del sistema.
+
+     El suceso de cierre no espera, de modo que se detiene siempre y
+     se decide después. */
+  ventana.on('close', function (ev) {
+    if (permitirCierre) return;
+    ev.preventDefault();
+    decideCierre();
+  });
 
   /* La recarga vuelve a levantar la página: la cola de archivos
      tiene que esperar otra vez al aviso de que está lista. */

@@ -393,6 +393,18 @@ public class MainActivity extends Activity {
     Toast.makeText(this, R.string.otra_vez, Toast.LENGTH_SHORT).show();
   }
 
+  /* Android mata lo que está en segundo plano cuando necesita
+     memoria, y no avisa.  Éste es el último momento seguro para
+     dejar a salvo el dibujo. */
+  @Override
+  protected void onPause() {
+    if (web != null) {
+      web.evaluateJavascript(
+          "window.CADCopia && window.CADAPP && window.CADCopia.guarda(window.CADAPP, 'segundo plano')", null);
+    }
+    super.onPause();
+  }
+
   @Override
   protected void onDestroy() {
     if (web != null) {

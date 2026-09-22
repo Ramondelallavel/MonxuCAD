@@ -87,6 +87,12 @@ no hay manera de firmar una actualización de lo ya instalado.
   herramientas de la cinta y designar no lo abren nunca. Sí aparece
   solo cuando la orden pide texto de verdad —*Escriba texto:*—,
   porque entonces hace falta.
+- **El dibujo se guarda solo.** Cada pocos segundos y, sobre todo, en
+  cuanto la aplicación sale de la pantalla: Android mata lo que está
+  en segundo plano cuando necesita memoria y no avisa. Si eso pasa, al
+  volver a abrirla le ofrece recuperar lo que quedó a medias. Aun así,
+  guarde con **GUARDAR** lo que quiera conservar: la copia es una red,
+  no un archivo suyo.
 - El botón de **volver** cancela la orden que esté en marcha, igual que
   Escape. Pulsado dos veces seguidas, sale.
 - Para abrir un dibujo, la orden **ABRE**: sale el selector de
