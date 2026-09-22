@@ -327,6 +327,10 @@
         text: buildPrompt(msg, opts)
       };
       app.setPrompt(app.pending.text);
+      /* Cuando lo que se pide es texto, en un teléfono hace falta el
+         teclado y éste es el único momento en que se sabe.  Fuera del
+         táctil no cambia nada: la línea de comandos ya tiene el foco. */
+      if (app.tactil && kind === 'string') app.focusCmd();
       app.refresh();
     });
   };

@@ -76,10 +76,18 @@ no hay manera de firmar una actualización de lo ya instalado.
 - **Dos dedos** acercan, alejan y encuadran a la vez, y se pueden usar
   en mitad de una orden sin perderla: se pellizca para ver mejor y se
   sigue precisando puntos donde se estaba.
+- **El teclado sale cuando usted quiere**, no solo. Para escribir una
+  orden, toque la **línea de comandos** de abajo; al aceptarla, el
+  teclado se retira para dejar ver el dibujo. Dibujar, pulsar
+  herramientas de la cinta y designar no lo abren nunca. Sí aparece
+  solo cuando la orden pide texto de verdad —*Escriba texto:*—,
+  porque entonces hace falta.
 - El botón de **volver** cancela la orden que esté en marcha, igual que
   Escape. Pulsado dos veces seguidas, sale.
-- Para abrir un dibujo, la orden **ABRE**. Para guardarlo, **GUARDAR**:
-  sale el selector del sistema y se elige la carpeta.
+- Para abrir un dibujo, la orden **ABRE**: sale el selector de
+  documentos del teléfono con sus archivos, y vale cualquier carpeta,
+  también Drive. Para guardarlo, **GUARDAR**: sale el selector y se
+  elige dónde dejarlo.
 
 La aplicación **no pide ningún permiso** y no sale a la red.
 

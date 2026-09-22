@@ -538,7 +538,7 @@
       self.recentMenu(e.clientX, e.clientY);
     });
     this.el.search.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { app.exec(self.el.search.value); self.el.search.value = ''; self.el.input.focus(); }
+      if (e.key === 'Enter') { app.exec(self.el.search.value); self.el.search.value = ''; app.focusCmd(); }
     });
     this.syncStatus();
   };
@@ -563,7 +563,9 @@
   UI.prototype.run = function (spec) {
     var parts = String(spec).split(' ');
     this.app.startCommand(parts[0], parts.slice(1));
-    this.el.input.focus();
+    /* Por el guardián, no directo: con el dedo esto abría el teclado
+       cada vez que se pulsaba una herramienta. */
+    this.app.focusCmd();
   };
 
   /* ---------- Desplazamiento lateral de la cinta ----------
@@ -615,7 +617,7 @@
       if (!b) return;
       self.activeTab = b.dataset.tab;
       self.buildRibbon();
-      self.el.input.focus();
+      self.app.focusCmd();
     };
     this.el.tabs.ondblclick = function () {
       self.el.ribbon.classList.toggle('collapsed');
@@ -933,9 +935,11 @@
       e.stopPropagation();
       if (k.dataset.kw === '\u0000def') app.feedEnter();
       else app.feedInput(k.dataset.kw);
-      inp.focus();
+      app.focusCmd();
     });
-    document.getElementById('cmdrow').addEventListener('click', function () { inp.focus(); });
+    /* Tocar la línea de comandos es la manera de pedir el teclado en
+       un teléfono, así que aquí sí se fuerza. */
+    document.getElementById('cmdrow').addEventListener('click', function () { app.focusCmd(true); });
   };
 
   UI.prototype.renderAC = function () {

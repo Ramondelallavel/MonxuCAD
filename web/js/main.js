@@ -7,6 +7,14 @@
 
   function App() {
     this.doc = new CAD.Doc();
+    /* Con el dedo, dar el foco a la línea de comandos abre el teclado
+       en pantalla.  Se arranca por lo que dice el navegador del
+       aparato y se corrige con cada toque, porque hay portátiles con
+       pantalla táctil donde se usan las dos cosas. */
+    this.tactil = false;
+    try {
+      this.tactil = window.matchMedia('(pointer: coarse)').matches;
+    } catch (e) { /* navegador sin matchMedia */ }
     this.selSet = [];
     this.prevSelSet = [];
     this.preview = [];
@@ -51,6 +59,12 @@
     this.r = new CAD.Renderer(this.cv, this);
     this.ui = new CAD.UI(this);
     this.ui.init();
+    /* Antes que nada: lo que decida esto cambia si los demás
+       manejadores pueden robar el foco. */
+    document.addEventListener('pointerdown', function (e) {
+      self.tactil = e.pointerType === 'touch';
+    }, true);
+
     this.wireCanvas();
     this.wireKeys();
     this.wireFile();
@@ -128,9 +142,32 @@
     this.focusCmd();
   };
 
-  App.prototype.focusCmd = function () {
+  /* Devolver el foco a la línea de comandos es lo que hace que Intro
+     y la barra espaciadora sigan funcionando después de pinchar en el
+     lienzo.  Con un teclado físico no se nota; en un teléfono abre el
+     teclado en pantalla y tapa media aplicación, y volvía a abrirse
+     con cada toque.  Así que en táctil sólo se hace cuando el comando
+     está pidiendo texto de verdad —entonces el teclado hace falta— o
+     cuando se pide a propósito, que es lo que ocurre al tocar la
+     propia línea de comandos. */
+  App.prototype.focusCmd = function (aposta) {
     var i = document.getElementById('cmdinput');
-    if (i && document.activeElement !== i) i.focus();
+    if (!i) return;
+    if (this.tactil && !aposta && !this.expectingText()) return;
+    if (document.activeElement !== i) i.focus();
+  };
+
+  /* Suelta la línea de comandos para que el teclado se cierre solo en
+     cuanto se ha escrito la orden y toca dibujar. */
+  App.prototype.sueltaCmd = function () {
+    if (!this.tactil) return;
+    var i = document.getElementById('cmdinput');
+    if (!i || document.activeElement !== i) return;
+    var self = this;
+    setTimeout(function () {
+      if (self.expectingText()) return;
+      if (document.activeElement === i) i.blur();
+    }, 0);
   };
   App.prototype.expectingText = function () {
     return !!(this.pending && this.pending.kind === 'string');
@@ -180,6 +217,7 @@
   App.prototype.feedInput = function (t) {
     if (this.pending) this.feedText(t);
     else this.exec(t);
+    this.sueltaCmd();
   };
 
   App.prototype.setCurrentColor = function (c) {

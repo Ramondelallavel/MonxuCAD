@@ -149,19 +149,35 @@ public class MainActivity extends Activity {
                                        FileChooserParams parametros) {
         if (alElegir != null) alElegir.onReceiveValue(null);
         alElegir = respuesta;
+
+        /* El intento que arma el WebView a partir del «accept» de la
+           página arrastra la lista de tipos que sale de «.dxf, .dwg,
+           .json, .dcad».  Android no conoce esas extensiones, así que
+           esa lista no casa con ningún archivo: el selector salía
+           vacío y lo único que ofrecía era crear uno nuevo.
+
+           Se arma aquí uno propio.  ACTION_OPEN_DOCUMENT sólo sabe
+           elegir archivos que ya existen —no tiene modo de crear— y
+           se enseñan todos, porque quien mira la extensión al abrir
+           es la propia aplicación. */
+        Intent abrir = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        abrir.addCategory(Intent.CATEGORY_OPENABLE);
+        abrir.setType("*/*");
         try {
-          Intent intencion = parametros.createIntent();
-          intencion.addCategory(Intent.CATEGORY_OPENABLE);
-          /* La página pide «.dxf,.dwg,.json,.dcad».  Android no conoce
-             esas extensiones, las convierte en tipos que no casan con
-             nada y el selector saldría vacío, así que se enseña todo y
-             es la propia aplicación la que mira la extensión al abrir. */
-          intencion.setType("*/*");
-          startActivityForResult(Intent.createChooser(intencion, getString(R.string.elija)), PIDE_ABRIR);
+          startActivityForResult(abrir, PIDE_ABRIR);
           return true;
         } catch (ActivityNotFoundException e) {
-          alElegir = null;
-          return false;
+          /* Reserva para un aparato sin selector de documentos. */
+          Intent otro = new Intent(Intent.ACTION_GET_CONTENT);
+          otro.addCategory(Intent.CATEGORY_OPENABLE);
+          otro.setType("*/*");
+          try {
+            startActivityForResult(Intent.createChooser(otro, getString(R.string.elija)), PIDE_ABRIR);
+            return true;
+          } catch (ActivityNotFoundException e2) {
+            alElegir = null;
+            return false;
+          }
         }
       }
     });
