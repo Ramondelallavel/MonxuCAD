@@ -5,7 +5,7 @@
 | Dónde | Archivo |
 |---|---|
 | **Android** | [MonxuCAD.apk](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD.apk) · [comprimido](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-apk.zip) |
-| **Windows** | [instalador](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.exe) · [portable](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows-portable.exe) |
+| **Windows** | [instalador](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.exe) · [portable](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows-portable.exe) · [comprimido](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.zip) |
 | **macOS** | [Apple Silicon](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-arm64.dmg) · [Intel](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-x64.dmg) |
 | **Linux** | [AppImage](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.AppImage) · [.deb](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.deb) |
 
