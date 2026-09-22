@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- No hace falta ningún permiso: los archivos se abren y se guardan
+       con el selector del sistema, y no se sale a la red. -->
+
+  <application
+      android:allowBackup="true"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher_round"
+      android:label="@string/nombre"
+      android:hardwareAccelerated="true"
+      android:largeHeap="true"
+      android:supportsRtl="false"
+      android:theme="@style/Tema">
+
+    <meta-data
+        android:name="android.webkit.WebView.EnableSafeBrowsing"
+        android:value="false" />
+
+    <activity
+        android:name=".MainActivity"
+        android:exported="true"
+        android:launchMode="singleTask"
+        android:windowSoftInputMode="adjustResize"
+        android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|density|uiMode|fontScale|locale|layoutDirection">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

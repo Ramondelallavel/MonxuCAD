@@ -76,6 +76,12 @@ o, si no quieres instalar nada:
 python3 -m http.server 8000 --directory web
 ```
 
+## Sin navegador
+
+Para instalarla como programa en el ordenador o en el teléfono —con
+icono propio, sin conexión y con los diálogos de archivo del sistema—
+vea [NATIVO.md](NATIVO.md).
+
 ## Nota sobre abrir el archivo directamente
 
 Abrir `web/index.html` con doble clic (`file://`) funciona para dibujar, pero el

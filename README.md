@@ -168,6 +168,19 @@ y `GUARDARDWG` lo escribe.
 Sin el puente, el DXF que genera MonxuCAD lo abre AutoCAD de forma nativa y
 `GUARDARCOMO` produce el `.dwg` equivalente.
 
+## Instalarla en el ordenador o en el teléfono
+
+Además de abrirse en el navegador, MonxuCAD se instala como programa:
+
+- **Desde el propio navegador** — botón **Instalar**, arriba a la
+  derecha. Queda con icono y ventana propios y funciona sin conexión.
+- **Windows, macOS y Linux** — instalador, `.dmg`, AppImage o `.deb`,
+  con los diálogos de archivo del sistema y doble clic sobre un `.dxf`.
+- **Android** — APK, sin pasar por la tienda y sin pedir permisos.
+
+Los binarios se compilan en **Actions** y se descargan de ahí. Todo el
+detalle está en [`docs/NATIVO.md`](docs/NATIVO.md).
+
 ## Puesta en marcha
 
 Sólo la aplicación web (sin DWG): cualquier servidor estático sobre `web/`.
@@ -227,8 +240,13 @@ web/                aplicación (sin dependencias, JavaScript puro)
     main.js         interacción, archivos, arranque
     app3d.js        conmutador 2D/3D, navegación y trayectorias en pantalla
     dwgbridge.js    cliente del puente DWG
+    instalar.js     instalación en el equipo y archivos de arranque
+  sw.js             copia local para trabajar sin conexión
+  manifest.webmanifest
+desktop/            envoltura de escritorio (Electron)
+android/            envoltura de Android (WebView)
 server/             servicio de conversión DWG ⇄ DXF
-docs/               instalación del motor de conversión
+docs/               instalación nativa y motor de conversión
 ```
 
 ## Atajos

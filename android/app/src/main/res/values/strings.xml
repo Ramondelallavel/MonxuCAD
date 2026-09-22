@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="nombre">MonxuCAD</string>
+  <string name="elija">Elija un dibujo</string>
+  <string name="otra_vez">Pulse otra vez para salir</string>
+</resources>

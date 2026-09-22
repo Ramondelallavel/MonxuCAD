@@ -520,6 +520,22 @@
 
   /* ------------------------------------------------------------
      Entrega del archivo al usuario
+
+     Hay cuatro maneras de sacar un archivo del programa y ninguna
+     está disponible en todas partes:
+
+       1. El puente nativo que ponen la aplicación de escritorio y la
+          de Android: escribe en el disco con el diálogo del sistema
+          y contesta dónde ha quedado el archivo.
+       2. Las descargas del visor de claude.ai.
+       3. El diálogo «Guardar como» del navegador, que deja elegir
+          carpeta.
+       4. Un enlace de descarga corriente, que entienden todos los
+          navegadores.
+
+     Dentro del visor de claude.ai se usa sólo el segundo camino: el
+     enlace de descarga no funciona ahí, pero tampoco da error, así
+     que probarlo sería anunciar un archivo que no ha salido.
      ------------------------------------------------------------ */
   var downloadsNS = undefined;
   async function getDownloads() {
@@ -531,14 +547,95 @@
   }
   X.getDownloads = getDownloads;
 
+  var TIPOS = {
+    dxf: 'application/dxf', dwg: 'image/vnd.dwg', dcad: 'application/json',
+    json: 'application/json', png: 'image/png', svg: 'image/svg+xml',
+    pdf: 'application/pdf', stl: 'model/stl', obj: 'model/obj',
+    mtl: 'model/mtl', '3mf': 'model/3mf', gltf: 'model/gltf+json',
+    glb: 'model/gltf-binary', zip: 'application/zip', csv: 'text/csv',
+    txt: 'text/plain', nc: 'text/plain', tap: 'text/plain',
+    gcode: 'text/plain', mpf: 'text/plain', ptp: 'text/plain'
+  };
+  X.mimeDe = function (filename) {
+    return TIPOS[String(filename).split('.').pop().toLowerCase()] || 'application/octet-stream';
+  };
+
+  /* Los exportadores entregan cadenas, Uint8Array o un Blob ya hecho
+     (la captura de pantalla).  Todo acaba en Blob para no repetir
+     tres veces cada camino de salida. */
+  function aBlob(data, filename) {
+    if (typeof Blob !== 'undefined' && data instanceof Blob) return data;
+    var tipo = X.mimeDe(filename);
+    if (typeof data === 'string') return new Blob([data], { type: tipo + ';charset=utf-8' });
+    return new Blob([data], { type: tipo });
+  }
+
+  async function aBase64(blob) {
+    var bytes = new Uint8Array(await blob.arrayBuffer()), partes = [], paso = 0x8000;
+    for (var i = 0; i < bytes.length; i += paso)
+      partes.push(String.fromCharCode.apply(null, bytes.subarray(i, i + paso)));
+    return btoa(partes.join(''));
+  }
+
+  /* El puente de Android contesta en el acto y el de escritorio
+     devuelve una promesa; esperar el resultado sirve para los dos.
+     Contesta «ok:<ruta>», «cancelado» o cualquier otra cosa, que se
+     toma por avería y hace seguir probando. */
+  async function guardaNativo(app, filename, blob) {
+    var n = window.MonxuNative;
+    if (!n || typeof n.guardar !== 'function') return 'no';
+    var res;
+    try { res = await n.guardar(filename, await aBase64(blob), blob.type || ''); }
+    catch (e) { return 'no'; }
+    res = String(res == null ? '' : res);
+    if (res === 'cancelado') return 'cancelado';
+    if (res.slice(0, 3) === 'ok:' || res === 'ok') {
+      app.out('Archivo guardado: ' + (res.slice(3) || filename));
+      return 'si';
+    }
+    return 'no';
+  }
+
+  /* En el navegador se baja como se baja cualquier cosa: a la carpeta
+     de descargas.  El diálogo de «guardar en tal carpeta» existe, pero
+     sólo se puede abrir mientras dura el gesto del usuario y exportar
+     un dibujo grande tarda más que eso; pasado ese momento el navegador
+     lo rechaza igual que si lo hubiera cancelado la persona, y no hay
+     manera de distinguir una cosa de la otra.  Quien quiera elegir
+     carpeta al guardar tiene la aplicación de escritorio, que abre el
+     diálogo del sistema. */
+  function guardaNavegador(app, filename, blob) {
+    try {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = filename; a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        if (a.parentNode) a.parentNode.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 30000);
+      app.out('Archivo descargado: ' + filename);
+      return 'si';
+    } catch (e) { return 'no'; }
+  }
+
   /* Guarda un archivo. Si la extensión no está permitida por el visor,
      se entrega comprimido en ZIP conservando el nombre y la extensión. */
   X.saveFile = async function (app, filename, data, kind) {
     var dl = await getDownloads();
+
     if (!dl) {
+      var blob = aBlob(data, filename);
+      var v = await guardaNativo(app, filename, blob);
+      if (v === 'si') return true;
+      if (v === 'cancelado') { app.out('*Cancelado*', 'warn'); return false; }
+      if (guardaNavegador(app, filename, blob) === 'si') return true;
       app.ui.downloadFallback(filename, data);
       return false;
     }
+
     try {
       await dl.save({ filename: filename, data: data });
       app.out('Archivo guardado: ' + filename);

@@ -1,0 +1,49 @@
+plugins {
+  id 'com.android.application'
+}
+
+android {
+  namespace 'es.monxucad.app'
+  compileSdk 35
+
+  defaultConfig {
+    applicationId 'es.monxucad.app'
+    minSdk 26
+    targetSdk 35
+    versionCode 1
+    versionName '1.0.0'
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+}
+
+dependencies {
+  implementation 'androidx.webkit:webkit:1.12.1'
+}
+
+/* La aplicación web no está duplicada dentro del proyecto Android:
+   vive en web/, que es lo que se publica también en la página y lo
+   que empaqueta la versión de escritorio.  Se copia a los activos
+   antes de cada compilación, para que el APK no se quede con una
+   copia vieja.
+
+   Queda fuera el service worker: dentro del APK los archivos ya son
+   locales, así que sólo añadiría una segunda capa de caché capaz de
+   seguir sirviendo la versión anterior después de actualizar. */
+def copiaWeb = tasks.register('copiaWeb', Sync) {
+  from rootProject.file('../web')
+  into file('src/main/assets/www')
+  exclude 'sw.js'
+}
+
+tasks.named('preBuild') { dependsOn copiaWeb }

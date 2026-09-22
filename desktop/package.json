@@ -1,0 +1,146 @@
+{
+  "name": "monxucad",
+  "productName": "MonxuCAD",
+  "version": "1.0.0",
+  "description": "Estación de dibujo y diseño 2D y 3D con modelado de sólidos y generación de código de control numérico.",
+  "license": "MIT",
+  "author": {
+    "name": "Ramón de la Llave",
+    "email": "ramon.delallavel@gmail.com"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "empaqueta": "electron-builder --dir",
+    "windows": "electron-builder --win",
+    "mac": "electron-builder --mac",
+    "linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "es.monxucad.app",
+    "productName": "MonxuCAD",
+    "copyright": "MIT",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web",
+        "to": "web",
+        "filter": [
+          "**/*",
+          "!sw.js"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "dxf",
+        "name": "Dibujo DXF",
+        "description": "Dibujo de intercambio DXF",
+        "role": "Editor"
+      },
+      {
+        "ext": "dcad",
+        "name": "Dibujo MonxuCAD",
+        "description": "Dibujo nativo de MonxuCAD",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "MonxuCAD-${version}-windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MonxuCAD"
+    },
+    "portable": {
+      "artifactName": "MonxuCAD-${version}-windows-portable.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.graphics-design",
+      "artifactName": "MonxuCAD-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "MonxuCAD"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Graphics",
+      "synopsis": "Dibujo y diseño 2D y 3D",
+      "desktop": {
+        "entry": {
+          "Name": "MonxuCAD",
+          "Comment": "Dibujo y diseño 2D y 3D",
+          "Categories": "Graphics;Engineering;"
+        }
+      },
+      "artifactName": "MonxuCAD-${version}-linux-${arch}.${ext}",
+      "maintainer": "Ramón de la Llave <ramon.delallavel@gmail.com>",
+      "desktopName": "monxucad.desktop",
+      "syncDesktopName": true
+    }
+  },
+  "homepage": "https://github.com/Ramondelallavel/monxucad",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ramondelallavel/monxucad.git"
+  }
+}

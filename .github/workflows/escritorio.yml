@@ -1,0 +1,104 @@
+# Compila la aplicación de escritorio para los tres sistemas.
+#
+# Cada uno se compila en su propia máquina porque el instalador de
+# Windows y el paquete de macOS no se pueden armar desde Linux.
+#
+# Ni Windows ni macOS se firman: no hay certificado. Al abrirlos por
+# primera vez el sistema avisa de que vienen de un origen desconocido;
+# en docs/NATIVO.md está cómo seguir adelante.
+name: Compilar la aplicación de escritorio
+
+on:
+  push:
+    branches: [main, master, 'claude/**']
+    paths:
+      - 'desktop/**'
+      - 'web/**'
+      - '.github/workflows/escritorio.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: escritorio-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  construir:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sistema: ubuntu-latest
+            nombre: linux
+            objetivo: --linux
+          - sistema: windows-latest
+            nombre: windows
+            objetivo: --win
+          - sistema: macos-latest
+            nombre: mac
+            objetivo: --mac
+
+    runs-on: ${{ matrix.sistema }}
+    name: ${{ matrix.nombre }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: desktop
+        run: npm ci
+
+      - name: Compilar
+        working-directory: desktop
+        env:
+          # Sin certificado: que no se pare buscando uno.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ''
+        run: npx electron-builder ${{ matrix.objetivo }} --publish never
+
+      # Un instalador que no lleve dentro la aplicación web arrancaría
+      # en blanco, y por fuera no se nota.
+      - name: Comprobar que la aplicación va dentro
+        shell: bash
+        working-directory: desktop
+        run: |
+          raiz=$(find dist -maxdepth 2 -type d -name resources | head -1)
+          if [ -z "$raiz" ]; then
+            raiz=$(find dist -maxdepth 4 -type d -path '*Contents/Resources' | head -1)
+          fi
+          echo "Recursos en: $raiz"
+          test -f "$raiz/web/index.html" || { echo "FALTA index.html"; exit 1; }
+          test -f "$raiz/web/app.css" || { echo "FALTA app.css"; exit 1; }
+          dentro=$(ls "$raiz/web/js" | wc -l)
+          esperados=$(ls ../web/js/*.js | wc -l)
+          echo "Scripts empaquetados: $dentro de $esperados"
+          [ "$dentro" -ge "$esperados" ] || { echo "Faltan scripts"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MonxuCAD-escritorio-${{ matrix.nombre }}
+          path: |
+            desktop/dist/*.exe
+            desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Dónde queda
+        shell: bash
+        run: |
+          {
+            echo "## Escritorio — ${{ matrix.nombre }}"
+            echo
+            echo "Se descarga de **Artifacts**, al final de esta misma página."
+          } >> "$GITHUB_STEP_SUMMARY"

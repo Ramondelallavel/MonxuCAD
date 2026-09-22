@@ -1,0 +1,36 @@
+{
+  "name": "MonxuCAD",
+  "short_name": "MonxuCAD",
+  "description": "Estación de dibujo y diseño 2D y 3D con modelado de sólidos y generación de código de control numérico.",
+  "lang": "es",
+  "dir": "ltr",
+  "id": "monxucad",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#2b2e31",
+  "theme_color": "#c0272d",
+  "categories": ["productivity", "graphics", "utilities"],
+  "icons": [
+    { "src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "iconos/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "iconos/icono-mascara-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "iconos/icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/dxf": [".dxf"],
+        "application/json": [".dcad"]
+      },
+      "icons": [
+        { "src": "iconos/icono-192.png", "sizes": "192x192", "type": "image/png" }
+      ],
+      "launch_type": "single-client"
+    }
+  ],
+  "launch_handler": { "client_mode": "focus-existing" }
+}
