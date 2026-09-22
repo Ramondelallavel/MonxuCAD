@@ -301,8 +301,58 @@
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     }
 
-    cv.addEventListener('pointerdown', function (e) {
-      cv.setPointerCapture(e.pointerId);
+    /* ---------- Dos dedos: acercar, alejar y encuadrar ----------
+
+       Un dedo hace de ratón, de modo que el primer toque tendría que
+       designar en el acto.  Pero entonces empezar un pellizco con un
+       comando a la espera dejaría un punto puesto donde nadie lo
+       quería, porque el primer dedo llega siempre antes que el
+       segundo.  Por eso el primer toque se retiene unas centésimas:
+       si llega otro dedo se descarta, y si no llega se suelta tal
+       cual.  La espera se acaba también en cuanto el dedo se mueve o
+       se levanta, así que dibujar y designar siguen yendo al momento.
+
+       Esto es sólo para el lienzo 2D; la ventana 3D lleva su propia
+       navegación. */
+    var dedos = new Map();
+    var gesto = null;
+    var espera = null;
+
+    function medida() {
+      var p = [];
+      dedos.forEach(function (q) { p.push(q); });
+      return {
+        dist: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y),
+        mid: { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 }
+      };
+    }
+
+    function sueltaEspera() {
+      if (!espera) return;
+      var ev = espera.ev;
+      clearTimeout(espera.t);
+      espera = null;
+      abajo(ev);
+    }
+
+    function olvidaEspera() {
+      if (!espera) return;
+      clearTimeout(espera.t);
+      espera = null;
+    }
+
+    /* El primer dedo puede haber empezado ya una ventana de
+       designación antes de que llegara el segundo. */
+    function cortaArrastre() {
+      if (!drag) return;
+      drag = null;
+      self.pickBox = null;
+      self.lassoPath = null;
+      self.refresh();
+    }
+
+    function abajo(e) {
+      try { cv.setPointerCapture(e.pointerId); } catch (err) { }
       var sp = local(e);
       self.cursorScreen = sp;
       if (e.button === 1 || (e.button === 0 && self.realtimePan)) {
@@ -373,9 +423,70 @@
         self.refresh();
       }
       drag = { mode: 'box', start: self.cursorWorld, startScreen: sp, shift: e.shiftKey, path: [sp], plen: 0 };
+    }
+
+    cv.addEventListener('pointerdown', function (e) {
+      if (e.pointerType !== 'touch') { abajo(e); return; }
+
+      /* Cuando el navegador dice que éste es el dedo primario no hay
+         ningún otro puesto, así que lo que quede apuntado es de un
+         gesto anterior cuyo «levantar» se perdió por el camino.  Sin
+         esto, un dedo fantasma haría que todos los toques siguientes
+         pasaran por pellizcos y dejaría de poderse dibujar. */
+      if (e.isPrimary) { dedos.clear(); gesto = null; }
+
+      dedos.set(e.pointerId, local(e));
+      if (dedos.size === 2) {
+        olvidaEspera();
+        cortaArrastre();
+        gesto = medida();
+        return;
+      }
+      if (dedos.size > 2) return;
+
+      try { cv.setPointerCapture(e.pointerId); } catch (err) { }
+      /* El suceso no sobrevive al turno, así que se guarda lo que hace
+         falta para atenderlo luego. */
+      espera = {
+        id: e.pointerId,
+        sp: local(e),
+        ev: {
+          pointerId: e.pointerId, pointerType: 'touch',
+          button: e.button, buttons: e.buttons,
+          shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey,
+          clientX: e.clientX, clientY: e.clientY,
+          preventDefault: function () { }
+        },
+        t: setTimeout(sueltaEspera, 70)
+      };
+    });
+
+    cv.addEventListener('pointercancel', function (e) {
+      if (e.pointerType !== 'touch') return;
+      dedos.delete(e.pointerId);
+      if (dedos.size < 2) gesto = null;
+      if (espera && espera.id === e.pointerId) olvidaEspera();
+      cortaArrastre();
     });
 
     cv.addEventListener('pointermove', function (e) {
+      if (e.pointerType === 'touch' && dedos.has(e.pointerId)) {
+        dedos.set(e.pointerId, local(e));
+        if (gesto && dedos.size > 1) {
+          var m = medida();
+          self.navigating();
+          if (gesto.dist > 4 && m.dist > 4) self.r.zoomBy(m.dist / gesto.dist, m.mid);
+          self.r.panBy(m.mid.x - gesto.mid.x, m.mid.y - gesto.mid.y);
+          gesto = m;
+          self.refresh();
+          return;
+        }
+        if (espera && espera.id === e.pointerId) {
+          var d = local(e);
+          if (Math.hypot(d.x - espera.sp.x, d.y - espera.sp.y) <= 4) return;
+          sueltaEspera();
+        }
+      }
       var sp = local(e);
       if (drag && drag.mode === 'pan') {
         self.navigating();
@@ -433,6 +544,16 @@
     });
 
     cv.addEventListener('pointerup', function (e) {
+      if (e.pointerType === 'touch') {
+        dedos.delete(e.pointerId);
+        if (gesto) {
+          /* El dedo que se levanta de un pellizco no designa nada. */
+          gesto = dedos.size > 1 ? medida() : null;
+          try { cv.releasePointerCapture(e.pointerId); } catch (err) { }
+          return;
+        }
+        if (espera && espera.id === e.pointerId) sueltaEspera();
+      }
       try { cv.releasePointerCapture(e.pointerId); } catch (err) { }
       if (drag && drag.mode === 'box') {
         var sp = local(e);

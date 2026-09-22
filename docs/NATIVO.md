@@ -147,6 +147,10 @@ apuntándola desde `buildTypes.release`.
 
 ### Cómo se usa en el teléfono
 
+- **Un dedo** hace de ratón: dibuja, designa y arrastra.
+- **Dos dedos** acercan, alejan y encuadran a la vez, y se pueden usar
+  en mitad de una orden sin perderla: se pellizca para ver mejor y se
+  sigue precisando puntos donde se estaba.
 - El botón de **volver** cancela la orden que esté en marcha, igual que
   Escape. Pulsado dos veces seguidas, sale.
 - Para abrir un dibujo, la orden **ABRE** dentro de la aplicación.
@@ -181,10 +185,9 @@ En el escritorio se puede levantar el servicio al lado, como está
 contado en [INSTALL.md](INSTALL.md); en el teléfono no. DXF, que es lo
 que MonxuCAD lee y escribe por su cuenta, funciona en todas partes.
 
-**Acercar con dos dedos.** El lienzo entiende el dedo como si fuera el
-ratón —se dibuja, se selecciona y se arrastra— pero el gesto de pellizco
-todavía no. Para acercar y alejar están los botones de la barra de
-navegación, a la derecha del lienzo.
+**Girar en 3D con dos dedos.** El lienzo 2D entiende el pellizco; la
+ventana de modelado 3D todavía no, y se navega con el ViewCube y la
+barra de navegación.
 
 **Firma.** Ni el instalador de Windows ni el paquete de macOS están
 firmados, porque firmar cuesta un certificado de pago. De ahí los avisos
