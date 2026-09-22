@@ -15,6 +15,7 @@ on:
       - 'desktop/**'
       - 'web/**'
       - '.github/workflows/escritorio.yml'
+      - '.github/publicar.sh'
   workflow_dispatch:
 
 permissions:
@@ -101,4 +102,56 @@ jobs:
             echo "## Escritorio — ${{ matrix.nombre }}"
             echo
             echo "Se descarga de **Artifacts**, al final de esta misma página."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Los artefactos de Actions van en ZIP y piden cuenta de GitHub.  Lo
+  # que se reparte va a la publicación de descargas, con nombres fijos
+  # que no cambian de una versión a otra.
+  publicar:
+    name: Dejarlo descargable
+    needs: construir
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: MonxuCAD-escritorio-*
+          path: descargas
+
+      - name: Poner nombres estables
+        run: |
+          mkdir -p publicar
+          copia() {
+            hallado=$(find descargas -type f -name "$1" | head -1)
+            if [ -n "$hallado" ]; then
+              cp "$hallado" "publicar/$2"
+              echo "  $2  <-  $(basename "$hallado")"
+            else
+              echo "  (sin $1)"
+            fi
+          }
+          copia '*windows-x64.exe'      MonxuCAD-windows.exe
+          copia '*windows-portable.exe' MonxuCAD-windows-portable.exe
+          copia '*mac-arm64.dmg'        MonxuCAD-mac-arm64.dmg
+          copia '*mac-x64.dmg'          MonxuCAD-mac-x64.dmg
+          copia '*.AppImage'            MonxuCAD-linux.AppImage
+          copia '*.deb'                 MonxuCAD-linux.deb
+          if [ -z "$(ls -A publicar)" ]; then
+            echo "No ha llegado ningún instalador."; exit 1
+          fi
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/publicar.sh publicar/*
+
+      - name: Dónde queda
+        run: |
+          {
+            echo "## Descarga directa"
+            echo
+            echo "https://github.com/${{ github.repository }}/releases/latest"
           } >> "$GITHUB_STEP_SUMMARY"

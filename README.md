@@ -170,16 +170,23 @@ Sin el puente, el DXF que genera MonxuCAD lo abre AutoCAD de forma nativa y
 
 ## Instalarla en el ordenador o en el teléfono
 
-Además de abrirse en el navegador, MonxuCAD se instala como programa:
+Descarga directa, sin cuenta y sin descomprimir, desde
+[la última compilación](https://github.com/Ramondelallavel/MonxuCAD/releases/latest):
 
-- **Desde el propio navegador** — botón **Instalar**, arriba a la
-  derecha. Queda con icono y ventana propios y funciona sin conexión.
-- **Windows, macOS y Linux** — instalador, `.dmg`, AppImage o `.deb`,
-  con los diálogos de archivo del sistema y doble clic sobre un `.dxf`.
-- **Android** — APK, sin pasar por la tienda y sin pedir permisos.
+| Dónde | |
+|---|---|
+| **Android** | [MonxuCAD.apk](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD.apk) — Android 7 o posterior, sin permisos |
+| **Windows** | [instalador](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.exe) · [portable](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows-portable.exe) |
+| **macOS** | [Apple Silicon](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-arm64.dmg) · [Intel](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-x64.dmg) |
+| **Linux** | [AppImage](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.AppImage) · [.deb](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.deb) |
 
-Los binarios se compilan en **Actions** y se descargan de ahí. Todo el
-detalle está en [`docs/NATIVO.md`](docs/NATIVO.md).
+También se instala desde el propio navegador con el botón **Instalar**,
+sin descargar nada: queda con icono y ventana propios y funciona sin
+conexión.
+
+Cada sistema avisa la primera vez de que el programa no viene de su
+tienda. Qué botón hay que pulsar en cada caso, y qué hacer si dice que
+no se ha podido instalar, está en [`docs/NATIVO.md`](docs/NATIVO.md).
 
 ## Puesta en marcha
 

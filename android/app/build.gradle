@@ -2,22 +2,43 @@ plugins {
   id 'com.android.application'
 }
 
+/* La clave con la que se firma no vive en el repositorio: la pasa el
+   flujo de trabajo por el entorno.  Si no hay ninguna, se compila sin
+   firmar y sólo sirve la versión de depuración. */
+def almacen = System.getenv('MONXU_ALMACEN')
+
 android {
   namespace 'es.monxucad.app'
   compileSdk 35
 
   defaultConfig {
     applicationId 'es.monxucad.app'
-    minSdk 26
+    /* Android 7 en adelante.  Poner el listón más alto no aporta nada
+       aquí y deja fuera teléfonos que podrían con esto de sobra. */
+    minSdk 24
     targetSdk 35
-    versionCode 2
-    versionName '1.0.1'
+    versionCode 3
+    versionName '1.0.2'
+  }
+
+  signingConfigs {
+    if (almacen) {
+      firma {
+        storeFile file(almacen)
+        storePassword System.getenv('MONXU_ALMACEN_CLAVE')
+        keyAlias System.getenv('MONXU_ALIAS')
+        keyPassword System.getenv('MONXU_ALIAS_CLAVE')
+      }
+    }
   }
 
   buildTypes {
     release {
+      /* Sin ofuscar: esto es una envoltura de cuatro clases y
+         encogerla no ahorra nada que merezca el riesgo. */
       minifyEnabled false
       proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+      if (almacen) signingConfig signingConfigs.firma
     }
   }
 

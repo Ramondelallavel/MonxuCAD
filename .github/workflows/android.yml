@@ -1,9 +1,11 @@
-# Compila el APK de Android.
+# Compila el APK de Android, lo abre en un teléfono virtual para
+# comprobar que de verdad funciona, y lo deja descargable.
 #
-# Aquí no se firma para la tienda: el APK sale firmado con la clave de
-# depuración, que es la que permite instalarlo a mano en el teléfono.
-# Para subirlo a Google Play hace falta una clave propia; está contado
-# en docs/NATIVO.md.
+# El APK sale firmado como versión, no como depuración: un APK de
+# depuración lo bloquea Play Protect con mucha más facilidad.  La clave
+# se toma de los secretos del repositorio si los hay; si no, se hace
+# una en el propio flujo, y entonces cada compilación lleva una firma
+# distinta y hay que desinstalar la anterior para poner la nueva.
 name: Compilar el APK de Android
 
 on:
@@ -13,6 +15,7 @@ on:
       - 'android/**'
       - 'web/**'
       - '.github/workflows/android.yml'
+      - '.github/publicar.sh'
   workflow_dispatch:
 
 permissions:
@@ -24,6 +27,7 @@ concurrency:
 
 jobs:
   apk:
+    name: Compilar
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,17 +58,45 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Compilar
+      # La firma y la compilación van en el mismo paso a propósito: así
+      # las contraseñas no salen de él.
+      - name: Compilar y firmar
         working-directory: android
-        run: gradle assembleDebug --no-daemon --stacktrace
+        env:
+          ALMACEN_B64: ${{ secrets.ANDROID_ALMACEN_BASE64 }}
+          ALMACEN_CLAVE: ${{ secrets.ANDROID_ALMACEN_CLAVE }}
+          ALIAS: ${{ secrets.ANDROID_ALIAS }}
+          ALIAS_CLAVE: ${{ secrets.ANDROID_ALIAS_CLAVE }}
+        run: |
+          ruta="$RUNNER_TEMP/firma.jks"
+          if [ -n "${ALMACEN_B64:-}" ]; then
+            printf '%s' "$ALMACEN_B64" | base64 -d > "$ruta"
+            export MONXU_ALMACEN="$ruta"
+            export MONXU_ALMACEN_CLAVE="$ALMACEN_CLAVE"
+            export MONXU_ALIAS="$ALIAS"
+            export MONXU_ALIAS_CLAVE="$ALIAS_CLAVE"
+            echo "Firmando con la clave guardada en el repositorio."
+          else
+            paso=$(openssl rand -hex 24)
+            keytool -genkeypair -v -keystore "$ruta" -alias monxucad \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$paso" -keypass "$paso" \
+              -dname "CN=MonxuCAD, O=MonxuCAD, C=ES" > /dev/null
+            export MONXU_ALMACEN="$ruta"
+            export MONXU_ALMACEN_CLAVE="$paso"
+            export MONXU_ALIAS=monxucad
+            export MONXU_ALIAS_CLAVE="$paso"
+            echo "::notice title=Firma de usar y tirar::No hay clave guardada en el repositorio, así que esta compilación lleva una firma propia. Para actualizar habrá que desinstalar la versión anterior. En docs/NATIVO.md está cómo guardar una clave fija."
+          fi
+          gradle assembleRelease --no-daemon --stacktrace
 
       # La aplicación web se copia a los activos antes de compilar; si
       # esa copia fallara, el APK saldría vacío por dentro y arrancaría
       # en una pantalla en blanco sin que nada avisara.
-      - name: Comprobar que el APK lleva la aplicación dentro
+      - name: Comprobar qué lleva el APK dentro
         working-directory: android
         run: |
-          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
           echo "APK: $apk ($(du -h "$apk" | cut -f1))"
           dentro=$(unzip -l "$apk" | grep -c 'assets/js/.*\.js' || true)
           echo "Scripts dentro del APK: $dentro"
@@ -74,6 +106,25 @@ jobs:
           if [ "$dentro" -lt "$esperados" ]; then
             echo "Faltan scripts: $dentro de $esperados"; exit 1
           fi
+
+      # Sin firma no se instala, y marcado como depurable lo bloquea
+      # Play Protect.  Las dos cosas se ven aquí y no en el teléfono.
+      - name: Comprobar la firma y que no va como depuración
+        working-directory: android
+        run: |
+          apk=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          herramientas="$ANDROID_HOME/build-tools/35.0.0"
+          "$herramientas/apksigner" verify --verbose "$apk"
+          badging=$("$herramientas/aapt2" dump badging "$apk")
+          if echo "$badging" | grep -q "application-debuggable"; then
+            echo "El APK va marcado como depurable."; exit 1
+          fi
+          # Un APK marcado «testOnly» lo rechaza el instalador del
+          # teléfono con «no se ha instalado», aunque adb lo acepte.
+          if echo "$badging" | grep -qi "testOnly"; then
+            echo "El APK va marcado como testOnly y el teléfono lo rechazaría."; exit 1
+          fi
+          echo "$badging" | grep -E "^package|sdkVersion|targetSdkVersion|application-label:"
 
       # La dirección que abre la aplicación y la carpeta donde Gradle
       # deja los archivos tienen que casar: el repartidor de rutas
@@ -94,7 +145,7 @@ jobs:
         working-directory: android
         run: |
           mkdir -p ../salida
-          cp "$(find app/build/outputs/apk/debug -name '*.apk' | head -1)" ../salida/MonxuCAD.apk
+          cp "$(find app/build/outputs/apk/release -name '*.apk' | head -1)" ../salida/MonxuCAD.apk
 
       - uses: actions/upload-artifact@v4
         with:
@@ -102,18 +153,6 @@ jobs:
           path: salida/MonxuCAD.apk
           retention-days: 90
           if-no-files-found: error
-
-      - name: Dónde queda
-        run: |
-          {
-            echo "## APK de Android"
-            echo
-            echo "Se descarga de **Artifacts**, al final de esta misma página:"
-            echo "\`MonxuCAD-android-apk\`."
-            echo
-            echo "Viene firmado con la clave de depuración, así que el teléfono"
-            echo "pedirá permiso para instalar de fuera de la tienda."
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # Compilar no demuestra nada: una ruta mal puesta deja la aplicación
   # cargando una página que no existe, y el APK parece correcto.  Aquí
@@ -165,3 +204,33 @@ jobs:
             salida/registro.txt
           retention-days: 30
           if-no-files-found: warn
+
+  # Sólo se publica lo que ya se ha visto arrancar.
+  publicar:
+    name: Dejarlo descargable
+    needs: probar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: MonxuCAD-android-apk
+          path: salida
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/publicar.sh salida/MonxuCAD.apk
+
+      - name: Dónde queda
+        run: |
+          {
+            echo "## Descarga directa"
+            echo
+            echo "https://github.com/${{ github.repository }}/releases/latest/download/MonxuCAD.apk"
+            echo
+            echo "Enlace fijo, sin cuenta y sin descomprimir: se abre desde el móvil y se instala."
+          } >> "$GITHUB_STEP_SUMMARY"

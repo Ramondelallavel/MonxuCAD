@@ -1,126 +1,40 @@
 # Llevar MonxuCAD al ordenador y al teléfono
 
-Hay tres maneras de usar MonxuCAD sin abrir una pestaña del navegador
-cada vez, de menos a más trabajo:
+## Descarga directa
 
-| | Qué hay que hacer | Qué se consigue |
-|---|---|---|
-| **Instalar desde el navegador** | Un botón | Icono propio, ventana propia y funciona sin red |
-| **Aplicación de escritorio** | Descargar un instalador | Windows, macOS y Linux, con menús y diálogos del sistema |
-| **APK de Android** | Descargar un archivo | Teléfono y tableta, sin pasar por la tienda |
+| Dónde | Archivo |
+|---|---|
+| **Android** | [MonxuCAD.apk](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD.apk) |
+| **Windows** | [instalador](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows.exe) · [portable](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-windows-portable.exe) |
+| **macOS** | [Apple Silicon](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-arm64.dmg) · [Intel](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-mac-x64.dmg) |
+| **Linux** | [AppImage](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.AppImage) · [.deb](https://github.com/Ramondelallavel/MonxuCAD/releases/latest/download/MonxuCAD-linux.deb) |
 
-Las tres llevan dentro exactamente la misma aplicación: lo que cambia
-es la envoltura.
+Todos salen de <https://github.com/Ramondelallavel/MonxuCAD/releases/latest>.
+Son enlaces fijos: apuntan siempre a la última compilación, no hacen
+falta cuenta ni descomprimir nada, y se abren igual desde el móvil.
 
----
-
-## 1. Instalar desde el navegador
-
-Es lo más rápido y no hace falta descargar nada suelto. Sirve tanto en
-el ordenador como en el teléfono.
-
-**En el ordenador** (Chrome, Edge, Brave, Opera): abra la aplicación y
-pulse **Instalar**, arriba a la derecha. También vale el icono de
-instalar que sale en la barra de direcciones.
-
-**En Android** (Chrome): menú ⋮ ▸ **Instalar aplicación** o **Añadir a
-la pantalla de inicio**.
-
-**En iPhone y iPad** (Safari): compartir ▸ **Añadir a pantalla de
-inicio**. Safari no admite instalar con un botón.
-
-Queda un icono como el de cualquier otro programa, se abre en su propia
-ventana sin barra de direcciones y **funciona sin conexión**: la primera
-vez se guarda la aplicación entera en el equipo.
-
-En el ordenador, además, los archivos `.dxf` y `.dcad` quedan asociados:
-al abrir uno con doble clic se abre en MonxuCAD.
+> No use los artefactos de la pestaña **Actions** para instalar: van
+> dentro de un `.zip` y exigen tener la sesión iniciada en GitHub, así
+> que en un teléfono no se puede instalar lo que se baja de ahí. Están
+> para mirar compilaciones concretas, no para repartir.
 
 ---
 
-## 2. Aplicación de escritorio
+## Android
 
-### Descargarla ya compilada
+**Requisitos:** Android 7.0 o posterior.
 
-1. Entre en la pestaña **Actions** del repositorio.
-2. Elija **Compilar la aplicación de escritorio** y abra la última
-   ejecución terminada.
-3. Al final de la página, en **Artifacts**, descargue el de su sistema:
-
-   | Sistema | Archivo |
-   |---|---|
-   | Windows | `MonxuCAD-1.0.0-windows-x64.exe` (instalador) o `…-portable.exe` |
-   | macOS | `MonxuCAD-1.0.0-mac-arm64.dmg` (Apple Silicon) o `…-x64.dmg` (Intel) |
-   | Linux | `MonxuCAD-1.0.0-linux-x86_64.AppImage` o `…-linux-amd64.deb` |
-
-Si no aparece ninguna ejecución, láncela a mano con **Run workflow**.
-
-### Instalarla
-
-**Windows.** El instalador deja elegir carpeta y crea los accesos
-directos. El portable no instala nada: se ejecuta y ya. Como no está
-firmado, SmartScreen avisa la primera vez: *Más información* ▸ *Ejecutar
-de todas formas*.
-
-**macOS.** Abra el `.dmg` y arrastre MonxuCAD a Aplicaciones. Tampoco
-está firmado, así que la primera vez hay que abrirlo con el botón
-derecho ▸ **Abrir** en lugar de con doble clic, y confirmar. Si el
-sistema se pone tozudo:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/MonxuCAD.app
-```
-
-**Linux.** El AppImage se ejecuta tal cual:
-
-```bash
-chmod +x MonxuCAD-1.0.0-linux-x86_64.AppImage
-./MonxuCAD-1.0.0-linux-x86_64.AppImage
-```
-
-El `.deb` se instala con `sudo apt install ./MonxuCAD-1.0.0-linux-amd64.deb`
-y queda en el menú de aplicaciones.
-
-### Qué añade sobre el navegador
-
-- **Guardar donde uno quiera**, con el diálogo del sistema, en vez de
-  que todo caiga en la carpeta de descargas.
-- **Abrir un `.dxf` con doble clic** desde el explorador de archivos.
-- Menús de Archivo, Edición, Ver y Ayuda. Los atajos son los mismos de
-  siempre, porque los sigue atendiendo la aplicación.
-
-### Compilarla uno mismo
-
-Hace falta Node 20 o posterior.
-
-```bash
-cd desktop
-npm install
-npm start                        # para probarla sin empaquetar
-npx electron-builder --linux     # o --win, o --mac
-```
-
-Los archivos salen en `desktop/dist`. Cada sistema hay que compilarlo
-en su propia máquina: el instalador de Windows y el paquete de macOS no
-se pueden armar desde Linux.
-
----
-
-## 3. APK de Android
-
-### Descargarlo ya compilado
-
-1. Pestaña **Actions** del repositorio.
-2. **Compilar el APK de Android** ▸ última ejecución terminada.
-3. En **Artifacts**, `MonxuCAD-android-apk`. Se descarga en `.zip`;
-   dentro está `MonxuCAD.apk`.
-
-### Instalarlo
-
-Pase el `.apk` al teléfono (cable, correo, Drive, lo que sea) y ábralo
-desde el gestor de archivos. Android pedirá permiso para instalar
-aplicaciones de ese origen, porque no viene de la tienda: hay que
-dárselo una vez.
+1. Abra el enlace del `.apk` **desde el propio teléfono**.
+2. El navegador avisa de que ese tipo de archivo puede ser dañino:
+   **Descargar de todas formas**. Es el aviso que sale con cualquier
+   `.apk` que no venga de la tienda.
+3. Ábralo desde las descargas.
+4. La primera vez el sistema dice que no puede instalar aplicaciones
+   desconocidas de ese origen: **Ajustes ▸ Permitir desde esta
+   fuente**, y vuelva atrás.
+5. Si sale **Play Protect** diciendo que no reconoce al desarrollador:
+   **Más detalles ▸ Instalar de todas formas**.
+6. **Instalar**.
 
 Con el teléfono enchufado por cable también vale:
 
@@ -128,22 +42,33 @@ Con el teléfono enchufado por cable también vale:
 adb install -r MonxuCAD.apk
 ```
 
-**No pide ningún permiso.** Abre y guarda con el selector de archivos
-del sistema y no sale a la red.
+### Si dice que la aplicación no se ha instalado
 
-Viene firmado con la clave de depuración, y esa clave la genera cada
-compilación. Al instalar una versión nueva encima de otra anterior,
-Android puede quejarse de que las firmas no coinciden; entonces hay que
-desinstalar la vieja primero. Para que eso no pase, y para subirlo a
-Google Play, hace falta una clave propia:
+Casi siempre es por la firma. Cada compilación va firmada con una
+clave hecha en ese momento, y Android no deja poner una aplicación
+encima de otra si las firmas no coinciden. **Desinstale primero el
+MonxuCAD que tenga** y vuelva a instalar.
+
+Para que eso deje de pasar, guarde una clave fija en el repositorio:
 
 ```bash
-keytool -genkey -v -keystore monxucad.jks -keyalg RSA \
-        -keysize 2048 -validity 10000 -alias monxucad
+keytool -genkeypair -v -keystore monxucad.jks -alias monxucad \
+        -keyalg RSA -keysize 2048 -validity 10000
+base64 -w0 monxucad.jks > monxucad.jks.base64
 ```
 
-y declararla en `android/app/build.gradle` dentro de `signingConfigs`,
-apuntándola desde `buildTypes.release`.
+y en **Settings ▸ Secrets and variables ▸ Actions** añada:
+
+| Secreto | Qué lleva |
+|---|---|
+| `ANDROID_ALMACEN_BASE64` | el contenido de `monxucad.jks.base64` |
+| `ANDROID_ALMACEN_CLAVE` | la contraseña del almacén |
+| `ANDROID_ALIAS` | `monxucad` |
+| `ANDROID_ALIAS_CLAVE` | la contraseña de la clave |
+
+Desde la compilación siguiente, las actualizaciones se instalan encima
+sin desinstalar nada. Guarde el `.jks` en sitio seguro: si se pierde,
+no hay manera de firmar una actualización de lo ya instalado.
 
 ### Cómo se usa en el teléfono
 
@@ -153,9 +78,10 @@ apuntándola desde `buildTypes.release`.
   sigue precisando puntos donde se estaba.
 - El botón de **volver** cancela la orden que esté en marcha, igual que
   Escape. Pulsado dos veces seguidas, sale.
-- Para abrir un dibujo, la orden **ABRE** dentro de la aplicación.
-- Para guardarlo, **GUARDAR**: sale el selector del sistema y se elige
-  la carpeta.
+- Para abrir un dibujo, la orden **ABRE**. Para guardarlo, **GUARDAR**:
+  sale el selector del sistema y se elige la carpeta.
+
+La aplicación **no pide ningún permiso** y no sale a la red.
 
 ### Compilarlo uno mismo
 
@@ -172,8 +98,89 @@ La aplicación web no está duplicada dentro del proyecto Android: se
 copia sola desde `web/` antes de cada compilación, así que el APK nunca
 se queda con una copia vieja.
 
-Si prefiere `./gradlew`, créelo una vez con `gradle wrapper` dentro de
-`android/`.
+---
+
+## Windows
+
+El instalador deja elegir carpeta y crea los accesos directos. El
+portable no instala nada: se ejecuta y ya.
+
+Ninguno de los dos está firmado —firmar cuesta un certificado de pago—,
+así que **SmartScreen** avisa la primera vez con «Windows protegió su
+PC». El botón para seguir está escondido: pulse **Más información** y
+aparece **Ejecutar de todas formas**.
+
+---
+
+## macOS
+
+Abra el `.dmg` y arrastre MonxuCAD a Aplicaciones.
+
+Tampoco está firmado, así que la primera vez hay que abrirlo con el
+**botón derecho ▸ Abrir**, no con doble clic, y confirmar en el cuadro
+que sale. Con doble clic el sistema no ofrece esa opción y sólo deja
+cancelar.
+
+Si aun así se pone tozudo:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/MonxuCAD.app
+```
+
+---
+
+## Linux
+
+```bash
+chmod +x MonxuCAD-linux.AppImage
+./MonxuCAD-linux.AppImage
+```
+
+El `.deb` se instala con `sudo apt install ./MonxuCAD-linux.deb` y queda
+en el menú de aplicaciones.
+
+---
+
+## Sin instalar nada: desde el navegador
+
+La aplicación también se instala desde el propio navegador, sin
+descargar ningún archivo suelto.
+
+- **Ordenador** (Chrome, Edge, Brave, Opera): pulse **Instalar**, arriba
+  a la derecha, o el icono de instalar de la barra de direcciones.
+- **Android** (Chrome): menú ⋮ ▸ **Instalar aplicación**.
+- **iPhone y iPad** (Safari): compartir ▸ **Añadir a pantalla de
+  inicio**. Safari no admite instalar con un botón.
+
+Queda con icono propio, se abre en su propia ventana y **funciona sin
+conexión**: la primera vez se guarda la aplicación entera en el equipo.
+En el ordenador, además, los `.dxf` y `.dcad` quedan asociados y se
+abren con doble clic.
+
+---
+
+## Qué añade el escritorio sobre el navegador
+
+- **Guardar donde uno quiera**, con el diálogo del sistema, en vez de
+  que todo caiga en la carpeta de descargas.
+- **Abrir un `.dxf` con doble clic** desde el explorador de archivos.
+- Menús de Archivo, Edición, Ver y Ayuda. Los atajos son los mismos de
+  siempre, porque los sigue atendiendo la aplicación.
+
+### Compilarlo uno mismo
+
+Hace falta Node 20 o posterior.
+
+```bash
+cd desktop
+npm install
+npm start                        # para probarla sin empaquetar
+npx electron-builder --linux     # o --win, o --mac
+```
+
+Los archivos salen en `desktop/dist`. Cada sistema hay que compilarlo
+en su propia máquina: el instalador de Windows y el paquete de macOS no
+se pueden armar desde Linux.
 
 ---
 
@@ -190,5 +197,5 @@ ventana de modelado 3D todavía no, y se navega con el ViewCube y la
 barra de navegación.
 
 **Firma.** Ni el instalador de Windows ni el paquete de macOS están
-firmados, porque firmar cuesta un certificado de pago. De ahí los avisos
-de la primera vez.
+firmados, porque firmar cuesta un certificado de pago. De ahí los
+avisos de la primera vez.
