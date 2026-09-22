@@ -521,16 +521,14 @@
   /* ------------------------------------------------------------
      Entrega del archivo al usuario
 
-     Hay cuatro maneras de sacar un archivo del programa y ninguna
-     está disponible en todas partes:
+     Hay tres maneras de sacar un archivo del programa y ninguna está
+     disponible en todas partes:
 
        1. El puente nativo que ponen la aplicación de escritorio y la
           de Android: escribe en el disco con el diálogo del sistema
           y contesta dónde ha quedado el archivo.
        2. Las descargas del visor de claude.ai.
-       3. El diálogo «Guardar como» del navegador, que deja elegir
-          carpeta.
-       4. Un enlace de descarga corriente, que entienden todos los
+       3. Un enlace de descarga corriente, que entienden todos los
           navegadores.
 
      Dentro del visor de claude.ai se usa sólo el segundo camino: el

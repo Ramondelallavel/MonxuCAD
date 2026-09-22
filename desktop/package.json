@@ -134,7 +134,6 @@
       },
       "artifactName": "MonxuCAD-${version}-linux-${arch}.${ext}",
       "maintainer": "Ramón de la Llave <ramon.delallavel@gmail.com>",
-      "desktopName": "monxucad.desktop",
       "syncDesktopName": true
     }
   },

@@ -34,11 +34,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Herramientas de Android
-        uses: android-actions/setup-android@v3
-
+      # La máquina de GitHub ya trae el SDK de Android instalado.  La
+      # acción de turno para prepararlo sigue pidiendo el paquete
+      # «tools», retirado hace años, y se cae; usar lo que ya hay es
+      # más corto y no depende de eso.
       - name: Piezas del SDK
-        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+        run: |
+          raiz="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sdkmanager=$(find "$raiz/cmdline-tools" -name sdkmanager -type f | sort -V | tail -1)
+          if [ -z "$sdkmanager" ]; then echo "No hay sdkmanager en $raiz"; exit 1; fi
+          echo "SDK en $raiz"
+          yes | "$sdkmanager" --licenses > /dev/null 2>&1 || true
+          "$sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$raiz" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$raiz" >> "$GITHUB_ENV"
 
       - name: Gradle
         uses: gradle/actions/setup-gradle@v4
