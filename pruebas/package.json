@@ -1,0 +1,12 @@
+{
+  "name": "monxucad-pruebas",
+  "private": true,
+  "type": "module",
+  "description": "Pruebas de regresión del dibujo 2D de MonxuCAD.",
+  "scripts": {
+    "test": "node ejecuta.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

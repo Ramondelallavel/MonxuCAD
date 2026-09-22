@@ -3,3 +3,4 @@ node_modules/
 .DS_Store
 server/oda.deb
 dist/
+pruebas/node_modules/

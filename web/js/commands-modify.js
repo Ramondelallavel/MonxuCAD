@@ -986,6 +986,12 @@
     if (!t1 || !t2) return false;
     if (prA.t !== 'seg') t1 = G.polar(prA.c, G.ang(prA.c, c), prA.r);
     if (prB.t !== 'seg') t2 = G.polar(prB.c, G.ang(prB.c, c), prB.r);
+    /* Si los dos puntos de tangencia coinciden es que los objetos ya
+       se tocaban en tangente: no hay esquina que redondear.  Sin esto
+       quedaba en el dibujo un arco de barrido cero —invisible, pero
+       objeto al fin y al cabo: contaba, se designaba y se escribía en
+       el DXF—. */
+    if (G.dist(t1, t2) < 1e-9) return false;
     var a0 = G.ang(c, t1), a1 = G.ang(c, t2);
     var sw = G.sweep(a0, a1);
     var arcEnt = sw <= Math.PI ? E.arc(c, r, a0, a1, { layer: doc.vars.CLAYER }) : E.arc(c, r, a1, a0, { layer: doc.vars.CLAYER });
@@ -1041,19 +1047,37 @@
   }
 
   /* recorta la entidad hasta el punto q conservando el lado del pick */
+  /* Recorta el objeto hasta el punto q conservando el lado donde se
+     designó, que es la regla de toda la vida: se queda la parte que
+     uno ha señalado.
+
+     Lo que había miraba a qué extremo caía más cerca la designación,
+     y eso es otra cosa.  En una línea de 0 a 100 empalmada en la
+     esquina de 100, designarla en el 80 —justo lo que se hace, porque
+     se pincha cerca de la esquina que se quiere redondear— dejaba el
+     muñón de 90 a 100 y se llevaba por delante los otros noventa.
+     Sólo salía bien designando en la mitad de más allá. */
   function trimTo(ctx, ent, pr, q, pick) {
     if (ent.type === 'LINE') {
-      var d1 = G.dist(ent.p1, pick), d2 = G.dist(ent.p2, pick);
-      if (d1 < d2) ent.p2 = { x: q.x, y: q.y }; else ent.p1 = { x: q.x, y: q.y };
-      if (d1 < d2) { /* conserva extremo p1 */ } 
-      var keepStart = G.dist(ent.p1, pick) <= G.dist(ent.p2, pick);
+      var dir = G.sub(ent.p2, ent.p1);
+      var largo2 = dir.x * dir.x + dir.y * dir.y;
+      if (largo2 < 1e-18) return;
+      var tq = ((q.x - ent.p1.x) * dir.x + (q.y - ent.p1.y) * dir.y) / largo2;
+      var tp = ((pick.x - ent.p1.x) * dir.x + (pick.y - ent.p1.y) * dir.y) / largo2;
+      /* La designación cae del lado de p1: se conserva p1→q. */
+      if (tp <= tq) ent.p2 = { x: q.x, y: q.y };
+      else ent.p1 = { x: q.x, y: q.y };
       return;
     }
     if (ent.type === 'ARC') {
       var a = G.ang(ent.c, q);
       var ap = G.ang(ent.c, pick);
-      var toStart = G.sweep(ent.a0, ap), toEnd = G.sweep(ap, ent.a1);
-      if (toStart < toEnd) ent.a0 = a; else ent.a1 = a;
+      /* Lo mismo medido sobre el arco: cuánto hay desde el principio
+         hasta el corte y hasta la designación. */
+      var hastaCorte = G.sweep(ent.a0, a);
+      var hastaPick = G.sweep(ent.a0, ap);
+      if (hastaPick <= hastaCorte) ent.a1 = a;
+      else ent.a0 = a;
       return;
     }
     if (ent.type === 'CIRCLE') {

@@ -1,0 +1,47 @@
+# Pasa las pruebas del dibujo 2D en cada cambio.
+#
+# No son pruebas de piezas sueltas: ejecutan los comandos de verdad,
+# designando objetos como lo hace el lienzo, y comprueban la geometría
+# que sale.  Los dos fallos que las trajeron —el empalme quedándose
+# con el trozo equivocado y el arco de barrido cero al empalmar
+# tangentes— no se veían de ninguna otra manera.
+name: Pruebas del dibujo 2D
+
+on:
+  push:
+    branches: [main, master, 'claude/**']
+    paths:
+      - 'web/**'
+      - 'pruebas/**'
+      - '.github/workflows/pruebas.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dibujo2d:
+    name: Dibujo 2D
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar
+        working-directory: pruebas
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Pasar las pruebas
+        working-directory: pruebas
+        run: node ejecuta.mjs

@@ -266,6 +266,7 @@ web/                aplicación (sin dependencias, JavaScript puro)
   manifest.webmanifest
 desktop/            envoltura de escritorio (Electron)
 android/            envoltura de Android (WebView)
+pruebas/            pruebas de regresión del dibujo 2D
 server/             servicio de conversión DWG ⇄ DXF
 docs/               instalación nativa y motor de conversión
 ```
