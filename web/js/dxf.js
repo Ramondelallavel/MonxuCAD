@@ -652,6 +652,11 @@
     W.p(9, '$LUPREC'); W.p(70, doc.vars.LUPREC || 4);
     W.p(9, '$AUNITS'); W.p(70, doc.vars.AUNITS || 0);
     W.p(9, '$AUPREC'); W.p(70, doc.vars.AUPREC || 2);
+    W.p(9, '$ANGBASE'); W.p(50, doc.vars.ANGBASE || 0);
+    W.p(9, '$ANGDIR'); W.p(70, doc.vars.ANGDIR || 0);
+    W.p(9, '$ORTHOMODE'); W.p(70, doc.vars.ORTHOMODE || 0);
+    W.p(9, '$MIRRTEXT'); W.p(70, doc.vars.MIRRTEXT || 0);
+    W.p(9, '$CELTSCALE'); W.p(40, doc.vars.CELTSCALE || 1);
     W.p(0, 'ENDSEC');
 
     /* ---------------- CLASSES ---------------- */
@@ -946,14 +951,30 @@
         if (pairs[k][0] === 9) {
           var vn = pairs[k][1], nx = pairs[k + 1];
           if (!nx) continue;
+          /* Varias de las que el propio programa escribe no se volvían a
+             leer: el estilo de cota y el de texto en curso, el relleno,
+             las unidades y los ángulos.  Un dibujo ajeno perdía todo eso
+             al abrirlo y seguía con los valores de fábrica. */
           if (vn === '$LTSCALE') doc.vars.LTSCALE = nx[1];
+          else if (vn === '$CELTSCALE') doc.vars.CELTSCALE = nx[1];
           else if (vn === '$TEXTSIZE') doc.vars.TEXTSIZE = nx[1];
+          else if (vn === '$TEXTSTYLE') doc.vars.TEXTSTYLE = String(nx[1]);
           else if (vn === '$CLAYER') doc.vars.CLAYER = String(nx[1]);
+          else if (vn === '$DIMSTYLE') doc.vars.DIMSTYLE = String(nx[1]);
           else if (vn === '$INSUNITS') doc.vars.INSUNITS = nx[1];
           else if (vn === '$PDMODE') doc.vars.PDMODE = nx[1];
           else if (vn === '$PDSIZE') doc.vars.PDSIZE = nx[1];
+          else if (vn === '$FILLMODE') doc.vars.FILLMODE = nx[1] ? 1 : 0;
+          else if (vn === '$LUNITS') doc.vars.LUNITS = nx[1];
           else if (vn === '$LUPREC') doc.vars.LUPREC = nx[1];
+          else if (vn === '$AUNITS') doc.vars.AUNITS = nx[1];
+          else if (vn === '$AUPREC') doc.vars.AUPREC = nx[1];
+          else if (vn === '$ANGBASE') doc.vars.ANGBASE = nx[1];
+          else if (vn === '$ANGDIR') doc.vars.ANGDIR = nx[1];
+          else if (vn === '$ORTHOMODE') doc.vars.ORTHOMODE = nx[1];
           else if (vn === '$DIMSCALE') doc.vars.DIMSCALE = nx[1];
+          else if (vn === '$MIRRTEXT') doc.vars.MIRRTEXT = nx[1];
+          else if (vn === '$LIMMIN') doc.vars.LIMMIN = { x: pairs[k + 1][1], y: pairs[k + 2][1] };
           else if (vn === '$LIMMAX') doc.vars.LIMMAX = { x: pairs[k + 1][1], y: pairs[k + 2][1] };
         }
       }
