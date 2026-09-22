@@ -16,7 +16,7 @@
 
     <meta-data
         android:name="android.webkit.WebView.EnableSafeBrowsing"
-        android:value="false" />
+        android:value="@bool/navegacion_segura" />
 
     <activity
         android:name=".MainActivity"

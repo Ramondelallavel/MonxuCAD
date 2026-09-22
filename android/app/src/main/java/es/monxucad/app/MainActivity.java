@@ -9,9 +9,12 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
 import android.view.ViewGroup;
+import android.webkit.ConsoleMessage;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -43,8 +46,17 @@ import java.util.Collections;
  */
 public class MainActivity extends Activity {
 
+  private static final String ETIQUETA = "MonxuCAD";
+
   private static final String ORIGEN = "https://appassets.androidplatform.net";
-  private static final String INICIO = ORIGEN + "/www/index.html";
+
+  /* El repartidor de rutas QUITA su propio prefijo antes de buscar el
+     archivo: con el prefijo «/aplicacion/», la dirección
+     «/aplicacion/index.html» acaba abriendo «index.html» en la raíz de
+     los activos, que es donde los deja Gradle.  Cambiar una de las dos
+     cosas sin la otra deja la ventana en blanco sin decir por qué. */
+  private static final String RUTA = "/aplicacion/";
+  private static final String INICIO = ORIGEN + RUTA + "index.html";
 
   private static final int PIDE_ABRIR = 101;
   private static final int PIDE_GUARDAR = 102;
@@ -65,7 +77,7 @@ public class MainActivity extends Activity {
     super.onCreate(estado);
 
     final WebViewAssetLoader cargador = new WebViewAssetLoader.Builder()
-        .addPathHandler("/www/", new WebViewAssetLoader.AssetsPathHandler(this))
+        .addPathHandler(RUTA, new WebViewAssetLoader.AssetsPathHandler(this))
         .build();
 
     web = new WebView(this);
@@ -104,6 +116,17 @@ public class MainActivity extends Activity {
         return true;
       }
 
+      /* Si la aplicación no carga, lo que se ve es una ventana vacía y
+         no hay manera de saber por qué.  Mejor decirlo. */
+      @Override
+      public void onReceivedError(WebView vista, WebResourceRequest peticion, WebResourceError error) {
+        if (!peticion.isForMainFrame()) return;
+        String donde = String.valueOf(peticion.getUrl());
+        String motivo = String.valueOf(error.getDescription());
+        Log.e(ETIQUETA, "No se pudo cargar " + donde + ": " + motivo);
+        vista.loadDataWithBaseURL(null, paginaDeAviso(donde, motivo), "text/html", "utf-8", null);
+      }
+
       @Override
       public void onPageFinished(WebView vista, String url) {
         /* Reserva para los WebView que no saben inyectar al principio
@@ -114,6 +137,13 @@ public class MainActivity extends Activity {
     });
 
     web.setWebChromeClient(new WebChromeClient() {
+      @Override
+      public boolean onConsoleMessage(ConsoleMessage msg) {
+        if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR)
+          Log.e(ETIQUETA, msg.message() + "  (" + msg.sourceId() + ":" + msg.lineNumber() + ")");
+        return true;
+      }
+
       @Override
       public boolean onShowFileChooser(WebView vista, ValueCallback<Uri[]> respuesta,
                                        FileChooserParams parametros) {
@@ -141,6 +171,24 @@ public class MainActivity extends Activity {
     }
 
     web.loadUrl(INICIO);
+  }
+
+  private static String esc(String t) {
+    return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+  }
+
+  private static String paginaDeAviso(String donde, String motivo) {
+    return "<!DOCTYPE html><html lang=\"es\"><head><meta charset=\"utf-8\">"
+        + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        + "<style>body{margin:0;padding:24px;background:#2b2e31;color:#dde1e6;"
+        + "font:16px/1.5 sans-serif}h1{font-size:19px;margin:0 0 12px}"
+        + "code{color:#e0a33a;word-break:break-all}p{color:#969ca4}</style></head><body>"
+        + "<h1>MonxuCAD no ha podido abrirse</h1>"
+        + "<p>No se pudo cargar <code>" + esc(donde) + "</code></p>"
+        + "<p>" + esc(motivo) + "</p>"
+        + "<p>Desinstale la aplicación y vuelva a instalarla; si sigue igual, "
+        + "es un fallo del programa y conviene contarlo.</p>"
+        + "</body></html>";
   }
 
   /* ------------------------------------------------------------
@@ -188,7 +236,9 @@ public class MainActivity extends Activity {
     });
   }
 
-  private class Puente {
+  /* Lo llama JavaScript por reflexión, así que ni la clase ni el
+     método pueden ser privados. */
+  public class Puente {
     @android.webkit.JavascriptInterface
     public void guardar(final String id, final String nombre, final String base64, final String tipo) {
       final byte[] datos;

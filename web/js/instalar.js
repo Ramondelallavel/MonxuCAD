@@ -30,8 +30,18 @@
   /* ------------------------------------------------------------
      Service worker
      ------------------------------------------------------------ */
+  /* Dentro de la aplicación de escritorio y de la de Android los
+     archivos ya son locales: una segunda capa de caché no ganaría
+     nada y podría seguir sirviendo la versión anterior después de
+     actualizar, así que ahí no se instala ninguna.  El escritorio se
+     descarta solo, porque no usa http; Android sí, y se reconoce por
+     la dirección desde la que sirve sus propios archivos. */
+  function esNativa() {
+    return !!window.MonxuNative || location.hostname === 'appassets.androidplatform.net';
+  }
+
   function registra() {
-    if (!enServidor || !('serviceWorker' in navigator)) return;
+    if (!enServidor || esNativa() || !('serviceWorker' in navigator)) return;
     navigator.serviceWorker.register('sw.js', { scope: './' }).then(function (reg) {
       /* Hay entornos que anulan el registro y contestan sin nada. */
       if (!reg || !reg.addEventListener) return;

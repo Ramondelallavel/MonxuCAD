@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- La aplicación no sale a la red: no hay nada que comprobar y la
+       comprobación sólo serviría para que arrancara más despacio.
+       Tiene que ser un booleano de verdad; escrito como texto en el
+       manifiesto, el sistema lo descarta sin decir nada. -->
+  <bool name="navegacion_segura">false</bool>
+</resources>
