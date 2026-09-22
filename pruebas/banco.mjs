@@ -70,12 +70,19 @@ export async function abreBanco() {
           if (d.t === 'linea') app.doc.add(E.line({ x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }, { layer: '0' }));
           else if (d.t === 'circulo') app.doc.add(E.circle({ x: d.x, y: d.y }, d.r, { layer: '0' }));
           else if (d.t === 'arco') app.doc.add(E.arc({ x: d.x, y: d.y }, d.r, d.a1, d.a2, { layer: '0' }));
+          else if (d.t === 'pol') app.doc.add(E.pline(d.verts, d.closed, { layer: '0' }));
         });
         app.refresh();
       },
       tipos() { return app.doc.entities.map(e => e.type).join(','); },
       sel(indices) { app.selSet = indices.map(i => app.doc.entities[i]).filter(Boolean); },
-      hist() { return document.getElementById('cmdhist').textContent.slice(-200); }
+      hist() { return document.getElementById('cmdhist').textContent.slice(-200); },
+      /* Medidas de geometría, que es lo que consultan AREA y las cotas. */
+      mide(i) {
+        const e = app.doc.entities[i];
+        if (!e) return null;
+        return { area: window.CAD.E.areaOf(e, app.doc), perim: window.CAD.E.perimOf(e, app.doc) };
+      }
     };
   });
   return { nav, pag, ruido };

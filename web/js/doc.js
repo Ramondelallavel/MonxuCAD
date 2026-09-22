@@ -597,7 +597,11 @@
     }
     if (ent.type === 'LWPOLYLINE' && ent.closed) {
       var v = ent.verts, n = v.length;
-      if (n < 3) return null;
+      /* Dos vértices bastan si alguno lleva curva: un arco y su cuerda
+         cierran un recinto con área —una D, el extremo de una ranura—
+         y la cuenta de abajo ya lo resuelve.  Pidiendo tres se decía
+         que esas figuras no tenían área. */
+      if (n < 2) return null;
       /* área con signo de los vértices, más los casquetes de los tramos
          curvos: el que se va hacia fuera suma y el que se mete, resta */
       var total = G.polyArea(v);

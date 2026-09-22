@@ -27,8 +27,10 @@ MONXU_NAVEGADOR=/ruta/al/chrome npm test
 | `d2d-modificar.mjs` | DESFASE de línea y de círculo hacia dentro y hacia fuera; EMPALME; CHAFLAN; SIMETRIA; GIRA; ESCALA; DESPLAZA; DESCOMP; UNIR; RECORTA; ALARGA |
 | `d2d-esquinas.mjs` | Que EMPALME y CHAFLAN conserven el lado designado, se designe cerca de la esquina, lejos o justo en la mitad |
 | `d2d-arcos.mjs` | Empalme entre arco y línea, y que dos objetos tangentes se rechacen en vez de dejar un arco de barrido cero |
+| `d2d-medidas.mjs` | Áreas y perímetros de rectángulo, círculo, hexágono, semicircunferencia y medio disco; descomponer y desfasar polilíneas con arcos; y que ACOTALINEAL, ACOTAALINEADA, ACOTARADIO, ACOTADIAMETRO y ACOTAANGULO midan lo que deben |
 
-Las dos últimas nacieron de sendos fallos reales: el empalme se quedaba
-con el trozo equivocado cuando se designaba cerca de la esquina —que es
-justo como se trabaja— y empalmar tangentes dejaba un objeto invisible
-metido en el dibujo.
+Varias nacieron de fallos reales: el empalme se quedaba con el trozo
+equivocado cuando se designaba cerca de la esquina —que es justo como
+se trabaja—, empalmar tangentes dejaba un objeto invisible metido en el
+dibujo, y un recinto cerrado por un arco y su cuerda —una D, el extremo
+de una ranura— se declaraba sin área.
